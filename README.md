@@ -115,37 +115,37 @@ chmod +x setup.sh
 #### Using Docker Compose
 ```bash
 # Build and start all services
-docker-compose up -d --build
+docker compose up -d --build
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Stop all services
-docker-compose down
+docker compose down
 
 # Stop and remove volumes
-docker-compose down -v
+docker compose down -v
 ```
 
 #### Individual Service Management
 ```bash
 # Start specific service
-docker-compose up -d user-service
+docker compose up -d user-service
 
 # Restart service
-docker-compose restart user-service
+docker compose restart user-service
 
 # View service logs
-docker-compose logs -f user-service
+docker compose logs -f user-service
 
 # Scale service
-docker-compose up -d --scale user-service=2
+docker compose up -d --scale user-service=2
 ```
 
 #### Development with Hot Reload
 ```bash
 # Start with volume mounts for development
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
 
 ### 3. Manual Setup (Alternative)
@@ -279,47 +279,47 @@ cd client && npm start
 ### Basic Docker Commands
 ```bash
 # Build all services
-docker-compose build
+docker compose build
 
 # Start all services in background
-docker-compose up -d
+docker compose up -d
 
 # Start with build (recommended for first run)
-docker-compose up -d --build
+docker compose up -d --build
 
 # View all running containers
-docker-compose ps
+docker compose ps
 
 # View logs for all services
-docker-compose logs -f
+docker compose logs -f
 
 # View logs for specific service
-docker-compose logs -f user-service
+docker compose logs -f user-service
 
 # Stop all services
-docker-compose down
+docker compose down
 
 # Stop and remove volumes (clean slate)
-docker-compose down -v
+docker compose down -v
 
 # Restart specific service
-docker-compose restart user-service
+docker compose restart user-service
 
 # Scale service (run multiple instances)
-docker-compose up -d --scale user-service=2
+docker compose up -d --scale user-service=2
 ```
 
 ### Development Commands
 ```bash
 # Start with hot reload (mounts source code)
-docker-compose up -d --build
+docker compose up -d --build
 
 # Rebuild specific service
-docker-compose build user-service
-docker-compose up -d user-service
+docker compose build user-service
+docker compose up -d user-service
 
 # Execute command in running container
-docker-compose exec user-service sh
+docker compose exec user-service sh
 
 # View container resource usage
 docker stats
@@ -331,33 +331,33 @@ docker system prune -a
 ### Production Commands
 ```bash
 # Build for production
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml build
 
 # Start production environment
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 # Update services (zero-downtime)
-docker-compose pull
-docker-compose up -d --no-deps user-service
+docker compose pull
+docker compose up -d --no-deps user-service
 ```
 
 ### Troubleshooting Commands
 ```bash
 # Check service health
-docker-compose ps
+docker compose ps
 
 # View service logs
-docker-compose logs user-service
+docker compose logs user-service
 
 # Check Redis connection
-docker-compose exec redis redis-cli ping
+docker compose exec redis redis-cli ping
 
 # Restart all services
-docker-compose restart
+docker compose restart
 
 # Remove and recreate containers
-docker-compose down
-docker-compose up -d --force-recreate
+docker compose down
+docker compose up -d --force-recreate
 ```
 
 ## 🎮 How to Play
