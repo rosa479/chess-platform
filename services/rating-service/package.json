@@ -1,7 +1,7 @@
 {
-  "name": "matchmaking-service",
+  "name": "rating-service",
   "version": "1.0.0",
-  "description": "Player matchmaking and game creation service for the chess platform.",
+  "description": "Glicko-2 rating system service for the chess platform.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

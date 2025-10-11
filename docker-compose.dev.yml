@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  user-service:
+    volumes:
+      - ./services/user-service/src:/app/src
+      - ./services/user-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  game-lifecycle-service:
+    volumes:
+      - ./services/game-lifecycle-service/src:/app/src
+      - ./services/game-lifecycle-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  matchmaking-service:
+    volumes:
+      - ./services/matchmaking-service/src:/app/src
+      - ./services/matchmaking-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  ai-analysis-service:
+    volumes:
+      - ./services/ai-analysis-service/src:/app/src
+      - ./services/ai-analysis-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  websocket-gateway-service:
+    volumes:
+      - ./services/websocket-gateway-service/src:/app/src
+      - ./services/websocket-gateway-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  tournament-service:
+    volumes:
+      - ./services/tournament-service/src:/app/src
+      - ./services/tournament-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  computer-opponent-service:
+    volumes:
+      - ./services/computer-opponent-service/src:/app/src
+      - ./services/computer-opponent-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  puzzle-service:
+    volumes:
+      - ./services/puzzle-service/src:/app/src
+      - ./services/puzzle-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  learning-service:
+    volumes:
+      - ./services/learning-service/src:/app/src
+      - ./services/learning-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  spectate-service:
+    volumes:
+      - ./services/spectate-service/src:/app/src
+      - ./services/spectate-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  community-service:
+    volumes:
+      - ./services/community-service/src:/app/src
+      - ./services/community-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  analysis-tools-service:
+    volumes:
+      - ./services/analysis-tools-service/src:/app/src
+      - ./services/analysis-tools-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  rating-service:
+    volumes:
+      - ./services/rating-service/src:/app/src
+      - ./services/rating-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  game-history-service:
+    volumes:
+      - ./services/game-history-service/src:/app/src
+      - ./services/game-history-service/package.json:/app/package.json
+    environment:
+      - NODE_ENV=development
+    command: npm run dev
+
+  client:
+    volumes:
+      - ./client/src:/app/src
+      - ./client/public:/app/public
+      - ./client/package.json:/app/package.json
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - FAST_REFRESH=false
+    command: npm start

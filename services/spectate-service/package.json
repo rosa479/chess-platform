@@ -1,7 +1,7 @@
 {
-  "name": "matchmaking-service",
+  "name": "spectate-service",
   "version": "1.0.0",
-  "description": "Player matchmaking and game creation service for the chess platform.",
+  "description": "Spectate service for watching ongoing games.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
