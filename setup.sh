@@ -41,14 +41,7 @@ check_docker() {
         exit 1
     fi
     
-    # Check for Docker Compose v2 (docker compose) first, then v1 (docker-compose)
-    if docker compose version &> /dev/null; then
-        COMPOSE_CMD="docker compose"
-        print_success "Docker Compose v2 detected"
-    elif command -v docker-compose &> /dev/null; then
-        COMPOSE_CMD="docker-compose"
-        print_success "Docker Compose v1 detected"
-    else
+    if ! command -v docker-compose &> /dev/null; then
         print_error "Docker Compose is not installed. Please install Docker Compose first."
         echo "Visit: https://docs.docker.com/compose/install/"
         exit 1
@@ -103,11 +96,11 @@ start_services() {
     
     # Build all services
     print_status "Building Docker images..."
-    $COMPOSE_CMD build
+    docker-compose build
     
     # Start all services
     print_status "Starting services..."
-    $COMPOSE_CMD up -d
+    docker-compose up -d
     
     print_success "All services started successfully!"
 }
@@ -139,7 +132,7 @@ wait_for_services() {
         print_status "Waiting for $service to be healthy..."
         timeout=60
         while [ $timeout -gt 0 ]; do
-            if $COMPOSE_CMD ps $service | grep -q "healthy\|Up"; then
+            if docker-compose ps $service | grep -q "healthy\|Up"; then
                 print_success "$service is healthy"
                 break
             fi
@@ -156,7 +149,7 @@ wait_for_services() {
 # Display service status
 show_status() {
     print_status "Service Status:"
-    $COMPOSE_CMD ps
+    docker-compose ps
     
     echo ""
     print_success "🎉 Chess Platform is ready!"
@@ -181,10 +174,10 @@ show_status() {
     echo "   - History: http://localhost:3013"
     echo ""
     echo "📋 Useful Commands:"
-    echo "   - View logs: $COMPOSE_CMD logs -f"
-    echo "   - Stop services: $COMPOSE_CMD down"
-    echo "   - Restart: $COMPOSE_CMD restart"
-    echo "   - Clean up: $COMPOSE_CMD down -v"
+    echo "   - View logs: docker-compose logs -f"
+    echo "   - Stop services: docker-compose down"
+    echo "   - Restart: docker-compose restart"
+    echo "   - Clean up: docker-compose down -v"
 }
 
 # Main execution
@@ -207,28 +200,28 @@ main() {
 case "${1:-}" in
     "dev")
         print_status "Starting in development mode..."
-        $COMPOSE_CMD -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+        docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
         ;;
     "prod")
         print_status "Starting in production mode..."
-        $COMPOSE_CMD -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+        docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
         ;;
     "stop")
         print_status "Stopping all services..."
-        $COMPOSE_CMD down
+        docker-compose down
         print_success "All services stopped"
         ;;
     "clean")
         print_status "Cleaning up..."
-        $COMPOSE_CMD down -v
+        docker-compose down -v
         docker system prune -f
         print_success "Cleanup completed"
         ;;
     "logs")
-        $COMPOSE_CMD logs -f
+        docker-compose logs -f
         ;;
     "status")
-        $COMPOSE_CMD ps
+        docker-compose ps
         ;;
     *)
         main
