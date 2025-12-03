@@ -7,18 +7,19 @@
     "@testing-library/jest-dom": "^5.16.4",
     "@testing-library/react": "^13.3.0",
     "@testing-library/user-event": "^13.5.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1",
-    "react-router-dom": "^6.3.0",
     "axios": "^0.27.2",
     "chess.js": "^1.0.0-beta.6",
-    "react-chessboard": "^3.4.0",
-    "socket.io-client": "^4.5.1",
-    "web-vitals": "^2.1.4",
-    "styled-components": "^5.3.5",
+    "framer-motion": "^7.2.1",
+    "or": "^0.2.0",
+    "react": "^18.2.0",
+    "react-chessboard": "^4.7.3",
+    "react-dom": "^18.2.0",
     "react-hot-toast": "^2.4.0",
-    "framer-motion": "^7.2.1"
+    "react-router-dom": "^6.3.0",
+    "react-scripts": "5.0.1",
+    "socket.io-client": "^4.5.1",
+    "styled-components": "^5.3.5",
+    "web-vitals": "^2.1.4"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -44,5 +45,9 @@
       "last 1 safari version"
     ]
   },
-  "proxy": "http://localhost:8080"
+  "proxy": "http://localhost:8080",
+  "devDependencies": {
+    "ajv": "^8.17.1",
+    "ajv-keywords": "^5.1.0"
+  }
 }
