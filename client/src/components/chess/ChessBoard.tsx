@@ -7,6 +7,7 @@ type PieceType = PieceSymbolType | null;
 
 interface ChessBoardProps {
   flipped?: boolean;
+  theme: string;  // ← NEW
 }
 
 const initialPosition: PieceType[][] = [
@@ -23,14 +24,13 @@ const initialPosition: PieceType[][] = [
 const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
 const ranks = ["8", "7", "6", "5", "4", "3", "2", "1"];
 
-export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false }) => {
+export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false, theme }) => {
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [legalMoves, setLegalMoves] = useState<string[]>([]);
   const [fen, setFen] = useState<string>("");
 
   const chessRef = useRef<Chess | null>(null);
 
-  // Initialize chess.js
   useEffect(() => {
     chessRef.current = new Chess();
     setFen(chessRef.current.fen());
@@ -40,12 +40,11 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false }) => {
     const ch = chessRef.current;
     if (!ch) return initialPosition;
 
-    // chess.board() returns rows from rank 8 -> 1
     const raw = ch.board();
     return raw.map((row: any[]) =>
       row.map((cell) => {
         if (!cell) return null;
-        const letter = cell.type; // 'p','r','n','b','q','k'
+        const letter = cell.type;
         return cell.color === "w"
           ? (letter.toUpperCase() as PieceSymbolType)
           : (letter.toLowerCase() as PieceSymbolType);
@@ -58,6 +57,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false }) => {
   const displayBoard = flipped
     ? [...board].reverse().map((row) => [...row].reverse())
     : board;
+
   const displayFiles = flipped ? [...files].reverse() : files;
   const displayRanks = flipped ? [...ranks].reverse() : ranks;
 
@@ -66,7 +66,6 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false }) => {
 
     if (!chessRef.current) return;
 
-    // If a legal move exists to this square and there is a selectedSquare, perform move
     if (selectedSquare && legalMoves.includes(squareId)) {
       const move = { from: selectedSquare, to: squareId } as any;
       const result = chessRef.current.move(move);
@@ -78,20 +77,17 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false }) => {
       return;
     }
 
-    // If selecting same square, toggle off
     if (selectedSquare === squareId) {
       setSelectedSquare(null);
       setLegalMoves([]);
       return;
     }
 
-    // Select a square with a piece and show legal moves
     const moves = chessRef.current.moves({ square: squareId as any, verbose: true });
-    if (moves && moves.length > 0) {
+    if (moves.length > 0) {
       setSelectedSquare(squareId);
       setLegalMoves(moves.map((m: any) => m.to));
     } else {
-      // No moves — clear selection
       setSelectedSquare(null);
       setLegalMoves([]);
     }
@@ -101,14 +97,10 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false }) => {
 
   return (
     <div className="relative animate-fade-in">
-      {/* Board container with shadow */}
-      <div
-        className="rounded-lg overflow-hidden shadow-lg"
-        style={{ boxShadow: "var(--shadow-lg)" }}
-      >
+      <div className="rounded-lg overflow-hidden shadow-lg" style={{ boxShadow: "var(--shadow-lg)" }}>
         <div
           className="grid grid-cols-8 aspect-square"
-          style={{ gridTemplateRows: "repeat(8, 1fr)" }} // keeps all squares same size
+          style={{ gridTemplateRows: "repeat(8, 1fr)" }}
         >
           {displayBoard.map((row, rowIndex) =>
             row.map((piece, colIndex) => {
@@ -129,37 +121,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false }) => {
                   )}
                   onClick={() => handleSquareClick(rowIndex, colIndex)}
                 >
-                  {/* File labels on bottom row */}
-                  {rowIndex === 7 && (
-                    <span
-                      className={cn(
-                        "absolute bottom-0.5 right-1 text-xs font-medium select-none",
-                        isLight ? "text-chess-dark" : "text-chess-light"
-                      )}
-                    >
-                      {displayFiles[colIndex]}
-                    </span>
-                  )}
-
-                  {/* Rank labels on left column */}
-                  {colIndex === 0 && (
-                    <span
-                      className={cn(
-                        "absolute top-0.5 left-1 text-xs font-medium select-none",
-                        isLight ? "text-chess-dark" : "text-chess-light"
-                      )}
-                    >
-                      {displayRanks[rowIndex]}
-                    </span>
-                  )}
-
-                  {/* Legal move indicator */}
-                  {isLegal && (
-                    <span className="absolute w-3 h-3 rounded-full bg-chess-highlight/90 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
-                  )}
-
-                  {/* Chess piece */}
-                  {piece && <ChessPiece piece={piece} size={56} />}
+                  {piece && <ChessPiece piece={piece} size={56} theme={theme} />}
                 </div>
               );
             })

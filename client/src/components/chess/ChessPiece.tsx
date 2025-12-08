@@ -1,31 +1,30 @@
 import React from "react";
-import Piece from "react-chess-pieces";
+import { cn } from "@/lib/utils";
 
 export type PieceType =
-  | "K"
-  | "Q"
-  | "R"
-  | "B"
-  | "N"
-  | "P"
-  | "k"
-  | "q"
-  | "r"
-  | "b"
-  | "n"
-  | "p";
+  | "K" | "Q" | "R" | "B" | "N" | "P"
+  | "k" | "q" | "r" | "b" | "n" | "p";
 
 interface ChessPieceProps {
   piece: PieceType;
-  // size in pixels
   size?: number;
+  className?: string;
+  theme: string; // NEW
 }
 
-export const ChessPiece: React.FC<ChessPieceProps> = ({ piece, size = 56 }) => {
-  // react-chess-pieces uses "K,Q,R..." and "k,q,r..." exactly like you already do
+export const ChessPiece: React.FC<ChessPieceProps> = ({
+  piece,
+  size = 56,
+  className,
+  theme,
+}) => {
+  // Build file path dynamically
+  const colorPrefix = piece === piece.toUpperCase() ? "w" : "b";
+  const src = `/piece/${theme}/${colorPrefix}${piece.toUpperCase()}.svg`;
+
   return (
     <span
-      className="chess-piece inline-flex items-center justify-center"
+      className={cn("inline-flex items-center justify-center", className)}
       style={{
         width: "80%",
         height: "80%",
@@ -34,12 +33,13 @@ export const ChessPiece: React.FC<ChessPieceProps> = ({ piece, size = 56 }) => {
         justifyContent: "center",
       }}
     >
-      <Piece
-        piece={piece}
+      <img
+        src={src}
+        alt={piece}
         style={{
           width: `${size}px`,
           height: `${size}px`,
-          display: "block",
+          objectFit: "contain",
           pointerEvents: "none",
           userSelect: "none",
         }}
