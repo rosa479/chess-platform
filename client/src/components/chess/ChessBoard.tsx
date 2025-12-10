@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Chess } from "chess.js";
 import { ChessPiece, PieceType as PieceSymbolType } from "./ChessPiece";
 import { cn } from "@/lib/utils";
@@ -7,40 +7,26 @@ type PieceType = PieceSymbolType | null;
 
 interface ChessBoardProps {
   flipped?: boolean;
-  theme: string;  // ← NEW
+  theme?: string;
+  boardImage?: string;
 }
 
-const initialPosition: PieceType[][] = [
-  ["r", "n", "b", "q", "k", "b", "n", "r"],
-  ["p", "p", "p", "p", "p", "p", "p", "p"],
-  [null, null, null, null, null, null, null, null],
-  [null, null, null, null, null, null, null, null],
-  [null, null, null, null, null, null, null, null],
-  [null, null, null, null, null, null, null, null],
-  ["P", "P", "P", "P", "P", "P", "P", "P"],
-  ["R", "N", "B", "Q", "K", "B", "N", "R"],
-];
+const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
+const RANKS = ["8", "7", "6", "5", "4", "3", "2", "1"];
 
-const files = ["a", "b", "c", "d", "e", "f", "g", "h"];
-const ranks = ["8", "7", "6", "5", "4", "3", "2", "1"];
+export const ChessBoard: React.FC<ChessBoardProps> = ({
+  flipped = false,
+  theme = "california",
+  boardImage = "/board/wood.jpg", //default board image
+}) => {
+  const chess = useMemo(() => new Chess(), []);
 
-export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false, theme }) => {
+  const [fen, setFen] = useState<string>(chess.fen());
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [legalMoves, setLegalMoves] = useState<string[]>([]);
-  const [fen, setFen] = useState<string>("");
-
-  const chessRef = useRef<Chess | null>(null);
-
-  useEffect(() => {
-    chessRef.current = new Chess();
-    setFen(chessRef.current.fen());
-  }, []);
 
   const getBoardFromChess = (): PieceType[][] => {
-    const ch = chessRef.current;
-    if (!ch) return initialPosition;
-
-    const raw = ch.board();
+    const raw = chess.board();
     return raw.map((row: any[]) =>
       row.map((cell) => {
         if (!cell) return null;
@@ -55,23 +41,23 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false, theme }
   const board = getBoardFromChess();
 
   const displayBoard = flipped
-    ? [...board].reverse().map((row) => [...row].reverse())
+    ? [...board].reverse().map((r) => [...r].reverse())
     : board;
+  const displayFiles = flipped ? [...FILES].reverse() : FILES;
+  const displayRanks = flipped ? [...RANKS].reverse() : RANKS;
 
-  const displayFiles = flipped ? [...files].reverse() : files;
-  const displayRanks = flipped ? [...ranks].reverse() : ranks;
+  const squareIdForDisplay = (row: number, col: number) =>
+    `${displayFiles[col]}${displayRanks[row]}`;
 
   const handleSquareClick = (row: number, col: number) => {
-    const squareId = `${displayFiles[col]}${displayRanks[row]}`;
+    const squareId = squareIdForDisplay(row, col);
 
-    if (!chessRef.current) return;
+    if (!chess) return;
 
     if (selectedSquare && legalMoves.includes(squareId)) {
       const move = { from: selectedSquare, to: squareId } as any;
-      const result = chessRef.current.move(move);
-      if (result) {
-        setFen(chessRef.current.fen());
-      }
+      const result = chess.move(move);
+      if (result) setFen(chess.fen());
       setSelectedSquare(null);
       setLegalMoves([]);
       return;
@@ -83,10 +69,10 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false, theme }
       return;
     }
 
-    const moves = chessRef.current.moves({ square: squareId as any, verbose: true });
-    if (moves.length > 0) {
+    const moves = (chess.moves({ square: squareId as any, verbose: true }) || []) as any[];
+    if (moves && moves.length > 0) {
       setSelectedSquare(squareId);
-      setLegalMoves(moves.map((m: any) => m.to));
+      setLegalMoves(moves.map((m) => m.to));
     } else {
       setSelectedSquare(null);
       setLegalMoves([]);
@@ -95,39 +81,94 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({ flipped = false, theme }
 
   const isLightSquare = (row: number, col: number) => (row + col) % 2 === 0;
 
+  // normalize boardImage -> /board/<file> (files live in public/board)
+  const normalized = boardImage.replace(/^\/+/, ""); // remove leading slashes
+  const boardSrc = normalized.includes("board/") ? `/${normalized}` : `/board/${normalized}`;
+
   return (
-    <div className="relative animate-fade-in">
-      <div className="rounded-lg overflow-hidden shadow-lg" style={{ boxShadow: "var(--shadow-lg)" }}>
-        <div
-          className="grid grid-cols-8 aspect-square"
-          style={{ gridTemplateRows: "repeat(8, 1fr)" }}
-        >
+    <div className="relative w-full max-w-[90vw] sm:max-w-[600px] mx-auto aspect-square">
+      {/* Board image (z-0) */}
+      <img
+        src={boardSrc}
+        alt="board"
+        className="absolute inset-0 w-full h-full object-cover pointer-events-none select-none z-0"
+        draggable={false}
+        onError={(e) => {
+          // small debug aid if the image fails to load
+          // eslint-disable-next-line no-console
+          console.warn("Board image failed to load:", boardSrc);
+        }}
+      />
+
+      {/* optional tint overlay (transparent) */}
+      <div className="absolute inset-0 z-10 pointer-events-none" />
+
+      {/* interactive grid & pieces (z-20) */}
+      <div className="absolute inset-0 z-20 rounded-lg overflow-hidden" style={{ boxShadow: "var(--shadow-lg)" }}>
+        <div className="grid grid-cols-8 h-full w-full" style={{ gridTemplateRows: "repeat(8, 1fr)" }}>
           {displayBoard.map((row, rowIndex) =>
             row.map((piece, colIndex) => {
-              const squareId = `${displayFiles[colIndex]}${displayRanks[rowIndex]}`;
+              const squareId = squareIdForDisplay(rowIndex, colIndex);
               const isSelected = selectedSquare === squareId;
               const isLight = isLightSquare(rowIndex, colIndex);
               const isLegal = legalMoves.includes(squareId);
 
+              const squareClass = cn(
+                "relative flex items-center justify-center cursor-pointer transition-all duration-150 select-none",
+                isSelected && "ring-2 ring-inset ring-chess-highlight"
+              );
+
               return (
                 <div
                   key={squareId}
-                  className={cn(
-                    "relative flex items-center justify-center cursor-pointer transition-all duration-150 bg-cover bg-center",
-                    isLight
-                      ? "bg-[url('/texture/light.webp')]"
-                      : "bg-[url('/texture/dark.webp')]",
-                    isSelected && "ring-2 ring-inset ring-chess-highlight"
-                  )}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSquareClick(rowIndex, colIndex);
+                  }}
                   onClick={() => handleSquareClick(rowIndex, colIndex)}
+                  className={squareClass}
                 >
-                  {piece && <ChessPiece piece={piece} size={56} theme={theme} />}
+                  {rowIndex === 7 && (
+                    <span
+                      className={cn(
+                        "absolute bottom-0.5 right-1 text-xs font-medium select-none",
+                        isLight ? "text-chess-dark" : "text-chess-light"
+                      )}
+                    >
+                      {displayFiles[colIndex]}
+                    </span>
+                  )}
+
+                  {colIndex === 0 && (
+                    <span
+                      className={cn(
+                        "absolute top-0.5 left-1 text-xs font-medium select-none",
+                        isLight ? "text-chess-dark" : "text-chess-light"
+                      )}
+                    >
+                      {displayRanks[rowIndex]}
+                    </span>
+                  )}
+
+                  {isLegal && (
+                    <span className="absolute w-3 h-3 rounded-full bg-chess-highlight/90 left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30" />
+                  )}
+
+                  {piece && (
+                    <div className="z-40">
+                      <ChessPiece piece={piece} size={56} theme={theme} />
+                    </div>
+                  )}
                 </div>
               );
             })
           )}
         </div>
       </div>
+
+      {/* debug border (shows container even if image 404) */}
+      <div className="pointer-events-none absolute inset-0 border border-transparent" />
     </div>
   );
 };
