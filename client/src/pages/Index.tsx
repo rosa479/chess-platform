@@ -4,6 +4,15 @@ import { ChessBoard } from "@/components/chess/ChessBoard";
 import { PlayerInfo } from "@/components/chess/PlayerInfo";
 import { GamePanel } from "@/components/chess/GamePanel";
 
+const boardColorMap = {
+  "blue-marble.jpg": { light: "210 80% 86%", dark: "210 85% 40%", highlight: "50 100% 60%" },
+  "blue.png":      { light: "210 80% 85%", dark: "215 85% 38%", highlight: "50 100% 60%" },
+  "wood3.jpg":     { light: "38 42% 85%", dark: "32 56% 47%", highlight: "50 100% 60%" },
+  "canvas2.jpg":   { light: "51 24% 85%", dark: "53 46% 38%", highlight: "50 100% 60%" },
+  // Add more presets as desired matching your image names...
+  "default":       { light: "210 30% 85%", dark: "210 70% 50%", highlight: "50 100% 60%" },
+};
+
 const Index = () => {
   const [theme, setTheme] = useState("cardinal");
 
@@ -36,6 +45,17 @@ const Index = () => {
   ];
 
   const [board, setBoard] = useState(boards[0]);
+
+  // Set the board colors according to preset
+  React.useEffect(() => {
+    const colors = boardColorMap[board] || boardColorMap["default"];
+    if (colors) {
+      const root = document.documentElement;
+      root.style.setProperty('--chess-light', colors.light);
+      root.style.setProperty('--chess-dark', colors.dark);
+      root.style.setProperty('--chess-highlight', colors.highlight);
+    }
+  }, [board]);
 
   const themes = [
     "alpha",
