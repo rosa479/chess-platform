@@ -6,53 +6,53 @@ import { Trophy, Target, Gamepad2, School, Calendar, Settings } from 'lucide-rea
 const Profile = () => {
   return (
     <MainLayout>
-      <div className="p-8 max-w-6xl mx-auto">
+      <div className="p-4 sm:p-6 md:p-8 max-w-full md:max-w-4xl lg:max-w-6xl mx-auto">
         {/* Profile Header */}
-        <div className="relative rounded-2xl p-6 mb-8 overflow-hidden bg-gradient-to-br from-primary/10 via-primary/5 to-background border border-border shadow-xl">
+        <div className="relative rounded-2xl p-4 sm:p-6 mb-6 sm:mb-8 overflow-hidden bg-gradient-to-br from-primary/10 via-primary/5 to-background border border-border shadow-xl">
           
           {/* subtle glow background */}
           <div className="absolute inset-0 pointer-events-none opacity-40 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.25),transparent_70%)]"></div>
 
-          <div className="relative flex items-start justify-between">
+          <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 sm:gap-0">
             
             {/* Left Section */}
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-4 sm:gap-6 w-full">
 
               {/* Avatar with glowing animated ring */}
-              <div className="relative">
+              <div className="relative shrink-0">
                 <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-primary/60 to-accent/60 blur-md animate-pulse"></div>
-                <div className="w-24 h-24 relative rounded-full bg-secondary flex items-center justify-center text-4xl border-2 border-primary/40 shadow-lg backdrop-blur-sm">
+                <div className="w-20 h-20 sm:w-24 sm:h-24 relative rounded-full bg-secondary flex items-center justify-center text-3xl sm:text-4xl border-2 border-primary/40 shadow-lg backdrop-blur-sm">
                   ♟️
                 </div>
               </div>
 
               {/* User Info */}
-              <div>
-                <h1 className="text-3xl font-bold tracking-tight text-foreground flex items-center gap-3">
+              <div className="flex-1 min-w-0">
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center gap-3 truncate">
                   Noobmaster69
                 </h1>
 
-                <p className="text-muted-foreground mt-1">Member since December 2024</p>
+                <p className="text-muted-foreground mt-1 text-sm sm:text-base truncate">Member since December 2024</p>
 
                 {/* small stats row */}
-                <div className="flex items-center gap-4 mt-4">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-4">
 
                   {/* Rating bubble */}
-                  <span className="px-3 py-1 rounded-full bg-primary/20 text-primary text-sm font-medium shadow-sm">
+                  <span className="px-2 sm:px-3 py-1 rounded-full bg-primary/20 text-primary text-xs sm:text-sm font-medium shadow-sm">
                     Rating: 1523
                   </span>
-                  <span className="px-3 py-1 rounded-full bg-primary/20 text-primary text-sm font-medium shadow-sm">
+                  <span className="px-2 sm:px-3 py-1 rounded-full bg-primary/20 text-primary text-xs sm:text-sm font-medium shadow-sm">
                     LBS Hall of Residence
                   </span>
-                  <span className="px-3 py-1 rounded-full bg-primary/20 text-primary text-sm font-medium shadow-sm">
+                  <span className="px-2 sm:px-3 py-1 rounded-full bg-primary/20 text-primary text-xs sm:text-sm font-medium shadow-sm">
                     #69 in IIT KGP
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Settings Button */}
-            <button className="px-4 py-2 rounded-lg bg-secondary hover:bg-muted transition-colors flex items-center gap-2 shadow-sm">
+            {/* Settings Button - move below info in mobile */}
+            <button className="mt-4 sm:mt-0 px-3 py-2 sm:px-4 sm:py-2 rounded-lg bg-secondary hover:bg-muted transition-colors flex items-center gap-2 shadow-sm w-full sm:w-auto justify-center">
               <Settings size={18} />
               <span className="text-sm">Settings</span>
             </button>
@@ -61,11 +61,11 @@ const Profile = () => {
         </div>
 
 
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Main Content */}
-          <div className="col-span-2 space-y-6">
+          <div className="md:col-span-2 space-y-6">
             {/* Rating Cards */}
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
                 { label: 'Bullet', rating: 1423, icon: '⚡' },
                 { label: 'Blitz', rating: 1523, icon: '🔥' },
@@ -120,10 +120,10 @@ const Profile = () => {
           </div>
 
           {/* Stats Sidebar */}
-          <div className="space-y-6">
-            <div className="bg-card rounded-xl p-6">
+          <div className="space-y-6 mt-6 md:mt-0">
+            <div className="bg-card rounded-xl p-4 sm:p-6">
               <h2 className="font-semibold mb-4">Statistics</h2>
-              <div className="space-y-4">
+              <div className="space-y-3 sm:space-y-4">
                 {[
                   { icon: Gamepad2, label: 'Games Played', value: '1,247' },
                   { icon: Trophy, label: 'Wins', value: '687 (55%)' },

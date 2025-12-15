@@ -14,8 +14,10 @@ import {
   Crown
 } from 'lucide-react';
 
+import { SheetClose } from "@/components/ui/sheet";
 interface SidebarProps {
   className?: string;
+  showCloseButton?: boolean;
 }
 
 const navItems = [
@@ -28,10 +30,10 @@ const navItems = [
   { icon: User, label: 'Profile', path: '/profile' },
 ];
 
-export const Sidebar: React.FC<SidebarProps> = ({ className }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ className, showCloseButton }) => {
   return (
     <aside className={cn(
-      "w-52 min-h-screen bg-sidebar flex flex-col border-r border-sidebar-border",
+      "min-w min-h-screen bg-sidebar flex flex-col border-r border-sidebar-border relative",
       className
     )}>
       {/* Logo */}
