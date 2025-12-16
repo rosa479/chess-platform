@@ -27,7 +27,14 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 <Menu />
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="pl-0 p-0 w-64 max-w-full md:hidden">
+            <SheetContent
+              side="left"
+              className="pl-0 p-0 w-64 max-w-full md:hidden"
+              aria-labelledby="mobile-sidebar-title"
+              aria-describedby="mobile-sidebar-description"
+            >
+              <div className="sr-only" id="mobile-sidebar-title">Navigation menu</div>
+              <div className="sr-only" id="mobile-sidebar-description">Sidebar navigation links</div>
               <Sidebar showCloseButton />
             </SheetContent>
           </Sheet>

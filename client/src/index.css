@@ -101,6 +101,37 @@
   .animate-pulse-slow {
     animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
+
+  @keyframes toast-progress {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-100% );
+    }
+  }
+
+  .animate-toast-progress {
+    animation: toast-progress 4s linear forwards;
+  }
+
+  .toast-progress-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: hsl(var(--primary) / 0.18);
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .toast-progress-bar {
+    position: absolute;
+    inset: 0;
+    background: hsl(var(--primary));
+    transform-origin: left;
+  }
 }
 
 @layer components {

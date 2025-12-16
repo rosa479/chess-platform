@@ -9,6 +9,7 @@ interface ChessBoardProps {
   flipped?: boolean;
   theme?: string;
   boardImage?: string;
+  onMove?: (move: { san: string; color: "w" | "b" }) => void;
 }
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -18,6 +19,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   flipped = false,
   theme = "california",
   boardImage = "/board/wood.jpg", //default board image
+  onMove,
 }) => {
   const chess = useMemo(() => new Chess(), []);
 
@@ -49,17 +51,46 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   const squareIdForDisplay = (row: number, col: number) =>
     `${displayFiles[col]}${displayRanks[row]}`;
 
+  const selectSquare = (squareId: string) => {
+    if (!chess) return;
+    const moves = (chess.moves({ square: squareId as any, verbose: true }) || []) as any[];
+    if (moves && moves.length > 0) {
+      setSelectedSquare(squareId);
+      setLegalMoves(moves.map((m) => m.to));
+    } else {
+      setSelectedSquare(null);
+      setLegalMoves([]);
+    }
+  };
+
+  const tryMoveTo = (targetSquare: string) => {
+    if (!chess || !selectedSquare) return;
+    if (!legalMoves.includes(targetSquare)) return;
+
+    const move = { from: selectedSquare, to: targetSquare } as any;
+    const result = chess.move(move);
+    if (result) {
+      setFen(chess.fen());
+      onMove?.({ san: result.san, color: result.color });
+    }
+    setSelectedSquare(null);
+    setLegalMoves([]);
+  };
+
   const handleSquareClick = (row: number, col: number) => {
     const squareId = squareIdForDisplay(row, col);
+    const squarePiece = displayBoard[row][col];
 
     if (!chess) return;
 
+    // Only allow selecting/moving pieces for the side whose turn it is
+    if (!selectedSquare && squarePiece) {
+      const color = squarePiece === squarePiece.toUpperCase() ? "w" : "b";
+      if (color !== chess.turn()) return;
+    }
+
     if (selectedSquare && legalMoves.includes(squareId)) {
-      const move = { from: selectedSquare, to: squareId } as any;
-      const result = chess.move(move);
-      if (result) setFen(chess.fen());
-      setSelectedSquare(null);
-      setLegalMoves([]);
+      tryMoveTo(squareId);
       return;
     }
 
@@ -69,14 +100,30 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
       return;
     }
 
-    const moves = (chess.moves({ square: squareId as any, verbose: true }) || []) as any[];
-    if (moves && moves.length > 0) {
-      setSelectedSquare(squareId);
-      setLegalMoves(moves.map((m) => m.to));
-    } else {
-      setSelectedSquare(null);
-      setLegalMoves([]);
+    selectSquare(squareId);
+  };
+
+  const handleDragStart = (squareId: string, e: React.DragEvent) => {
+    if (!chess) return;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", squareId);
+    selectSquare(squareId);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    // allow drop
+    e.preventDefault();
+  };
+
+  const handleDrop = (squareId: string, e: React.DragEvent) => {
+    e.preventDefault();
+    const from = e.dataTransfer.getData("text/plain") || selectedSquare;
+    if (!from) return;
+    if (from !== selectedSquare) {
+      // ensure legal moves for dragged piece
+      selectSquare(from);
     }
+    tryMoveTo(squareId);
   };
 
   const isLightSquare = (row: number, col: number) => (row + col) % 2 === 0;
@@ -127,6 +174,8 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                     if (e.key === "Enter") handleSquareClick(rowIndex, colIndex);
                   }}
                   onClick={() => handleSquareClick(rowIndex, colIndex)}
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(squareId, e)}
                   className={squareClass}
                 >
                   {rowIndex === 7 && (
@@ -156,7 +205,22 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                   )}
 
                   {piece && (
-                    <div className="z-40">
+                    <div
+                      className="z-40"
+                      draggable={(() => {
+                        if (!piece) return false;
+                        const color = piece === piece.toUpperCase() ? "w" : "b";
+                        return chess.turn() === color;
+                      })()}
+                      onDragStart={(e) => {
+                        const color = piece === piece.toUpperCase() ? "w" : "b";
+                        if (chess.turn() !== color) {
+                          e.preventDefault();
+                          return;
+                        }
+                        handleDragStart(squareId, e);
+                      }}
+                    >
                       <ChessPiece piece={piece} size={56} theme={theme} />
                     </div>
                   )}

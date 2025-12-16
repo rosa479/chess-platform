@@ -3,11 +3,18 @@ import { cn } from '@/lib/utils';
 import { MoveList } from './MoveList';
 import { Flag, RotateCcw, MessageSquare, Share2, Download } from 'lucide-react';
 
-interface GamePanelProps {
-  className?: string;
+interface Move {
+  number: number;
+  white: string;
+  black?: string;
 }
 
-export const GamePanel: React.FC<GamePanelProps> = ({ className }) => {
+interface GamePanelProps {
+  className?: string;
+  moves?: Move[];
+}
+
+export const GamePanel: React.FC<GamePanelProps> = ({ className, moves = [] }) => {
   const [activeTab, setActiveTab] = useState<'play' | 'chat'>('play');
 
   return (
@@ -43,7 +50,7 @@ export const GamePanel: React.FC<GamePanelProps> = ({ className }) => {
         {activeTab === 'play' ? (
           <>
             <h3 className="text-sm font-medium text-muted-foreground mb-3">Moves</h3>
-            <MoveList moves={[]} />
+            <MoveList moves={moves} />
           </>
         ) : (
           <div className="flex-1 flex flex-col">

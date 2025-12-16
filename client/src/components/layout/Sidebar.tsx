@@ -1,6 +1,9 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { NavLink } from '@/components/NavLink';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/use-auth';
+import { toast } from '@/hooks/use-toast';
 import { 
   Gamepad2, 
   Puzzle, 
@@ -31,6 +34,13 @@ const navItems = [
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ className, showCloseButton }) => {
+  const { user, isAuthenticated, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+    toast({ title: 'Logged out', description: 'You have been successfully logged out' });
+  };
+
   return (
     <aside className={cn(
       "min-w min-h-screen bg-sidebar flex flex-col border-r border-sidebar-border relative",
@@ -61,14 +71,28 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, showCloseButton }) 
         ))}
       </nav>
 
-      {/* Auth Buttons */}
+      {/* Auth Section */}
       <div className="p-4 space-y-2">
-        <button className="btn-accent w-full">
-          Sign Up
-        </button>
-        <button className="btn-outline w-full">
-          Login
-        </button>
+        {!isAuthenticated && (
+          <>
+            <Link to="/signup" className="btn-accent w-full block text-center">
+              Sign Up
+            </Link>
+            <Link to="/login" className="btn-outline w-full block text-center">
+              Login
+            </Link>
+          </>
+        )}
+        {isAuthenticated && (
+          <>
+            <div className="text-sm mb-2 px-2">
+              Hello, <b>{user?.username}</b>
+            </div>
+            <button className="btn-outline w-full" onClick={handleLogout}>
+              Log Out
+            </button>
+          </>
+        )}
       </div>
 
       {/* Footer Links */}

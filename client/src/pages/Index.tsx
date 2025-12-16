@@ -3,6 +3,7 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { ChessBoard } from "@/components/chess/ChessBoard";
 import { PlayerInfo } from "@/components/chess/PlayerInfo";
 import { GamePanel } from "@/components/chess/GamePanel";
+import type { Move } from "@/components/chess/MoveList";
 
 const boardColorMap = {
   "blue-marble.jpg": { light: "210 80% 86%", dark: "210 85% 40%", highlight: "50 100% 60%" },
@@ -15,6 +16,7 @@ const boardColorMap = {
 
 const Index = () => {
   const [theme, setTheme] = useState("cardinal");
+  const [moves, setMoves] = useState<Move[]>([]);
 
   const boards = [
     "blue-marble.jpg",
@@ -106,7 +108,7 @@ const Index = () => {
           <div className="w-full max-w-[90vw] sm:max-w-[600px] flex flex-col gap-2">
 
             <div className="flex">
-              {/* Theme Selector */}
+              {/* Theme Selector Temp*/}
               <div className="flex justify-center">
                 <select
                   className="border p-2 rounded bg-background text-foreground w-full md:w-auto"
@@ -119,7 +121,7 @@ const Index = () => {
                 </select>
               </div>
 
-              {/* Board Selector (dropdown) */}
+              {/* Board Selector (dropdown) Temp*/}
               <div className="flex justify-center">
                 <select
                   className="border p-2 rounded bg-background text-foreground mt-2 w-full md:w-auto"
@@ -135,14 +137,35 @@ const Index = () => {
 
             <PlayerInfo username="The duke" rating={420} isTop timeLeft="10:00" isActive={false} />
 
-            <ChessBoard theme={theme} boardImage={board} />
+            <ChessBoard
+              theme={theme}
+              boardImage={board}
+              onMove={({ san, color }) => {
+                setMoves((prev) => {
+                  if (color === "w") {
+                    const moveNumber = prev.length + 1;
+                    return [...prev, { number: moveNumber, white: san }];
+                  }
+                  // black move updates last ply
+                  const updated = [...prev];
+                  const last = updated[updated.length - 1];
+                  if (last) {
+                    updated[updated.length - 1] = { ...last, black: san };
+                  } else {
+                    // in case a black move somehow comes first
+                    updated.push({ number: prev.length + 1, white: "...", black: san });
+                  }
+                  return updated;
+                });
+              }}
+            />
 
             <PlayerInfo username="Noobmaster69" rating={679} isTop={false} timeLeft="10:00" isActive />
           </div>
         </div>
 
         <div className="w-full md:w-80 md:border-l border-t md:border-t-0 p-4">
-          <GamePanel className="h-full" />
+          <GamePanel className="h-full" moves={moves} />
         </div>
       </div>
     </MainLayout>
