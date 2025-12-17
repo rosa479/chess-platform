@@ -4,12 +4,13 @@ const cors = require('cors');
 const { createClient } = require('redis');
 const { v4: uuidv4 } = require('uuid');
 
+// Use node-fetch if available globally, otherwise require it
 const fetch = global.fetch || require('node-fetch');
 
 const app = express();
 app.use(express.json());
 
-// CORS configuration to allow the frontend (localhost:8080) during development
+// CORS configuration
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
@@ -18,7 +19,6 @@ app.use(
   })
 );
 
-// Matchmaking service port (per currWorking.md it runs on 3004)
 const PORT = process.env.PORT || 3004;
 
 /* ================== CONFIG ================== */
@@ -33,14 +33,8 @@ const TIME_CONTROLS = {
   rapid_increment: { initialMs: 600000, incrementMs: 5000 },
 };
 
-const RATING_TOLERANCE = 200;
-const MAX_WAIT_TIME = Number(process.env.MAX_WAIT_TIME_MS || 30000);
-
-const REDIS_URL =
-  process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-
-// Game Lifecycle Service now runs on 3003 (use fixed URL for local dev)
-const GAME_SERVICE_URL = 'http://localhost:3003';
+const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const GAME_SERVICE_URL = process.env.GAME_SERVICE_URL || 'http://localhost:3003';
 
 /* ================== REDIS ================== */
 
@@ -52,15 +46,6 @@ redis.on('error', err => console.error('Redis error', err));
   console.log('✅ Connected to Redis (matchmaking)');
   console.log(`🔗 Using GAME_SERVICE_URL = ${GAME_SERVICE_URL}`);
 })();
-
-/*
-Redis Keys
-----------
-queue:{timeControl}      -> ZSET  (score = rating, value = userId)
-entry:{userId}           -> HASH  (rating, timeControl, joinedAt)
-lock:{userId}            -> STRING (SET NX PX)
-activeGame:{userId}      -> STRING (gameId for an active game)
-*/
 
 /* ================== API ================== */
 
@@ -92,7 +77,7 @@ app.post('/matchmaking/join', async (req, res) => {
         score: rating,
         value: userId,
       })
-      .expire(`entry:${userId}`, 120)
+      .expire(`entry:${userId}`, 120) // Expire entry after 2 mins to prevent zombies
       .exec();
 
     res.json({ message: 'Added to queue' });
@@ -106,43 +91,60 @@ app.post('/matchmaking/join', async (req, res) => {
 app.post('/matchmaking/leave', async (req, res) => {
   const { userId } = req.body;
 
-  const entry = await redis.hGetAll(`entry:${userId}`);
-  if (!entry.timeControl) {
-    return res.json({ success: false });
+  try {
+    const entry = await redis.hGetAll(`entry:${userId}`);
+    if (!entry || !entry.timeControl) {
+      // Clean up just in case
+      await redis.del(`entry:${userId}`);
+      return res.json({ success: true });
+    }
+
+    await redis
+      .multi()
+      .zRem(`queue:${entry.timeControl}`, userId)
+      .del(`entry:${userId}`)
+      .del(`lock:${userId}`)
+      .exec();
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error leaving queue:', err);
+    res.status(500).json({ error: 'Internal error' });
   }
+});
 
-  await redis
-    .multi()
-    .zRem(`queue:${entry.timeControl}`, userId)
-    .del(`entry:${userId}`)
-    .del(`lock:${userId}`)
-    .exec();
+// Clear active game (useful when game ends and is deleted)
+app.post('/matchmaking/clear-active-game', async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'User ID is required' });
 
+  await redis.del(`activeGame:${userId}`);
   res.json({ success: true });
 });
 
-// Status
+// Status check
 app.get('/matchmaking/status/:userId', async (req, res) => {
   const userId = req.params.userId;
   const entry = await redis.hGetAll(`entry:${userId}`);
 
-  // If no queue entry, check if user has an active game
-  if (!entry.timeControl) {
-    const activeGameId = await redis.get(`activeGame:${userId}`);
+  // If valid queue entry found
+  if (entry.timeControl) {
     return res.json({
-      inQueue: false,
-      hasGame: !!activeGameId,
-      gameId: activeGameId || null,
+      inQueue: true,
+      timeControl: entry.timeControl,
+      rating: Number(entry.rating),
+      joinedAt: Number(entry.joinedAt),
+      hasGame: false,
+      gameId: null,
     });
   }
 
+  // If not in queue, check if game was created
+  const activeGameId = await redis.get(`activeGame:${userId}`);
   res.json({
-    inQueue: true,
-    timeControl: entry.timeControl,
-    rating: Number(entry.rating),
-    waitTime: Date.now() - Number(entry.joinedAt),
-    hasGame: false,
-    gameId: null,
+    inQueue: false,
+    hasGame: !!activeGameId,
+    gameId: activeGameId || null,
   });
 });
 
@@ -165,54 +167,49 @@ app.get('/matchmaking/time-controls', (_, res) => {
 
 async function matchmakingLoop() {
   for (const timeControl of Object.keys(TIME_CONTROLS)) {
+    // Fetch users in queue for this time control
     const users = await redis.zRangeWithScores(
       `queue:${timeControl}`,
       0,
       -1
     );
 
-    for (const userA of users) {
-      const lockA = await redis.set(`lock:${userA.value}`, '1', {
-        NX: true,
-        PX: 5000,
-      });
-      if (!lockA) continue;
+    if (users.length < 2) continue;
+
+    const locks = [];
+    try {
+      // Naive implementation: Pair first two available
+      // (Improvements: scan for similar ratings)
+      const [userA, userB] = users;
+
+      // Lock both users to prevent double-pairing
+      const lockA = await redis.set(`lock:${userA.value}`, '1', { NX: true, PX: 5000 });
+      const lockB = await redis.set(`lock:${userB.value}`, '1', { NX: true, PX: 5000 });
+      
+      if (!lockA || !lockB) {
+        // Failed to lock one, release whoever we locked and retry next tick
+        if (lockA) await redis.del(`lock:${userA.value}`);
+        if (lockB) await redis.del(`lock:${userB.value}`);
+        continue; 
+      }
+      
+      locks.push(`lock:${userA.value}`, `lock:${userB.value}`);
 
       const entryA = await redis.hGetAll(`entry:${userA.value}`);
-      if (!entryA.timeControl) {
-        await redis.del(`lock:${userA.value}`);
-        continue;
+      const entryB = await redis.hGetAll(`entry:${userB.value}`);
+
+      // Integrity check
+      if (!entryA.timeControl || !entryB.timeControl) continue;
+      if (entryA.timeControl === timeControl && entryB.timeControl === timeControl) {
+        await createMatch(userA.value, userB.value, timeControl);
       }
-
-      const waitTime = Date.now() - Number(entryA.joinedAt);
-      let tolerance = RATING_TOLERANCE;
-
-      if (waitTime > MAX_WAIT_TIME) tolerance *= 3;
-      else if (waitTime > MAX_WAIT_TIME / 2) tolerance *= 2;
-
-      const min = userA.score - tolerance;
-      const max = userA.score + tolerance;
-
-      const candidates = await redis.zRangeByScore(
-        `queue:${timeControl}`,
-        min,
-        max
-      );
-
-      for (const userB of candidates) {
-        if (userB === userA.value) continue;
-
-        const lockB = await redis.set(`lock:${userB}`, '1', {
-          NX: true,
-          PX: 5000,
-        });
-        if (!lockB) continue;
-
-        await createMatch(userA.value, userB, timeControl);
-        return;
+    } catch (err) {
+      console.error('Matchmaking loop error:', err);
+    } finally {
+      // Always release locks
+      for (const key of locks) {
+        await redis.del(key);
       }
-
-      await redis.del(`lock:${userA.value}`);
     }
   }
 }
@@ -226,16 +223,18 @@ async function createMatch(userA, userB, timeControl) {
 
   try {
     const url = `${GAME_SERVICE_URL}/games`;
+    
+    // IMPORTANT: We send 'pending' status or similar to tell Game Service
+    // NOT to start the clock immediately.
     const payload = {
       whitePlayerId: white,
       blackPlayerId: black,
       timeControl: TIME_CONTROLS[timeControl],
+      gameState: 'waiting_for_first_move', // Signal for the Game Service
+      autoStart: false                     // Explicit flag if your Game Service supports it
     };
 
-    console.log('🎯 Creating game via game-lifecycle service', {
-      url,
-      payload,
-    });
+    console.log('🎯 Creating game via game-lifecycle service', { url, payload });
 
     const res = await fetch(url, {
       method: 'POST',
@@ -245,37 +244,31 @@ async function createMatch(userA, userB, timeControl) {
     });
 
     if (!res.ok) {
-      const errorBody = await res.text().catch(() => '<no body>');
-      console.error('❌ Game service responded with error', {
-        status: res.status,
-        statusText: res.statusText,
-        body: errorBody,
-      });
-      throw new Error('Game service error');
+      throw new Error(`Game Service Error: ${res.statusText}`);
     }
 
     const body = await res.json().catch(() => null);
     const gameId = body?.gameId;
 
     if (!gameId) {
-      console.error('Game service did not return gameId');
       throw new Error('Game service did not return gameId');
     }
 
-    // Remove players from queue and record their active game
+    // Atomic Cleanup & Handoff
     await redis
       .multi()
       .zRem(`queue:${timeControl}`, userA, userB)
       .del(`entry:${userA}`, `entry:${userB}`)
       .del(`lock:${userA}`, `lock:${userB}`)
-      .set(`activeGame:${userA}`, gameId, { EX: 60 * 60 })
-      .set(`activeGame:${userB}`, gameId, { EX: 60 * 60 })
+      // Set active game with 1 hour expiry
+      .set(`activeGame:${userA}`, gameId, { EX: 3600 }) 
+      .set(`activeGame:${userB}`, gameId, { EX: 3600 })
       .exec();
 
-    console.log(`♟️ Match created: ${userA} vs ${userB} -> game ${gameId}`);
+    console.log(`♟️ Match created: ${white} (W) vs ${black} (B) -> Game ${gameId}`);
   } catch (err) {
-    console.error('❌ Match creation failed', err.message);
-    await redis.del(`lock:${userA}`, `lock:${userB}`);
+    console.error(`❌ Match creation failed for ${userA} vs ${userB}:`, err.message);
+    // Locks released in finally block of caller
   } finally {
     clearTimeout(timeout);
   }
@@ -284,7 +277,6 @@ async function createMatch(userA, userB, timeControl) {
 /* ================== LOOP ================== */
 
 let isRunning = false;
-
 setInterval(async () => {
   if (isRunning) return;
   isRunning = true;

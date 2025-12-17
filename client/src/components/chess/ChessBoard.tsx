@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Chess } from "chess.js";
 import { ChessPiece, PieceType as PieceSymbolType } from "./ChessPiece";
 import { cn } from "@/lib/utils";
@@ -9,7 +9,10 @@ interface ChessBoardProps {
   flipped?: boolean;
   theme?: string;
   boardImage?: string;
-  onMove?: (move: { san: string; color: "w" | "b" }) => void;
+  fen?: string; // External FEN to control the board position
+  onMove?: (move: { san: string; color: "w" | "b" }) => void; // For backward compatibility
+  onMoveAttempt?: (move: { from: string; to: string; promotion?: string }) => void; // Callback when user attempts a move
+  disabled?: boolean; // Disable move input
 }
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -19,11 +22,28 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   flipped = false,
   theme = "california",
   boardImage = "/board/wood.jpg", //default board image
+  fen: externalFen,
   onMove,
+  onMoveAttempt,
+  disabled = false,
 }) => {
   const chess = useMemo(() => new Chess(), []);
 
-  const [fen, setFen] = useState<string>(chess.fen());
+  // Use external FEN if provided, otherwise use internal state
+  const [internalFen, setInternalFen] = useState<string>(chess.fen());
+  const currentFen = externalFen ?? internalFen;
+  
+  // Sync chess instance with current FEN
+  useEffect(() => {
+    if (!currentFen) return;
+    try {
+      chess.load(currentFen);
+    } catch (e) {
+      console.error("Failed to load FEN:", currentFen, e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentFen]);
+
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [legalMoves, setLegalMoves] = useState<string[]>([]);
 
@@ -64,13 +84,23 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   };
 
   const tryMoveTo = (targetSquare: string) => {
-    if (!chess || !selectedSquare) return;
+    if (!chess || !selectedSquare || disabled) return;
     if (!legalMoves.includes(targetSquare)) return;
 
-    const move = { from: selectedSquare, to: targetSquare } as any;
-    const result = chess.move(move);
+    const moveObj = { from: selectedSquare, to: targetSquare } as any;
+    
+    // If onMoveAttempt is provided, use it (controlled mode)
+    if (onMoveAttempt) {
+      onMoveAttempt(moveObj);
+      setSelectedSquare(null);
+      setLegalMoves([]);
+      return;
+    }
+    
+    // Otherwise, make move locally (uncontrolled mode for backward compatibility)
+    const result = chess.move(moveObj);
     if (result) {
-      setFen(chess.fen());
+      setInternalFen(chess.fen());
       onMove?.({ san: result.san, color: result.color });
     }
     setSelectedSquare(null);
@@ -78,6 +108,8 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   };
 
   const handleSquareClick = (row: number, col: number) => {
+    if (disabled) return;
+    
     const squareId = squareIdForDisplay(row, col);
     const squarePiece = displayBoard[row][col];
 
@@ -207,7 +239,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
                   {piece && (
                     <div
                       className="z-40"
-                      draggable={(() => {
+                      draggable={!disabled && (() => {
                         if (!piece) return false;
                         const color = piece === piece.toUpperCase() ? "w" : "b";
                         return chess.turn() === color;

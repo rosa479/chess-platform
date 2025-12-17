@@ -41,3 +41,10 @@ export function logout() {
   localStorage.removeItem('user_info');
 }
 
+export async function getUserById(userId: string): Promise<User> {
+  const res = await fetch(`${USER_SERVICE_URL}/users/${userId}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to get user');
+  return data as User;
+}
+

@@ -31,6 +31,7 @@ export type Move = {
 
 export type MoveResult =
   | { success: true; newState: GameState }
+  | { success: true; gameOver: true; outcome: { winner: string; reason: string } }
   | { success: false; error: string };
 
 // Note: in production, games are created by the matchmaking service.
@@ -53,6 +54,17 @@ export async function createGameDirect(
   return data;
 }
 
+export async function getGameState(gameId: string): Promise<GameState> {
+  const res = await fetch(`${GAME_LIFECYCLE_SERVICE_URL}/games/${gameId}`);
+  const data = await res.json();
+  if (!res.ok) {
+    const error = new Error(data.error || "Failed to get game state") as any;
+    error.status = res.status; // Add status code to error
+    throw error;
+  }
+  return data as GameState;
+}
+
 export async function makeMove(
   gameId: string,
   playerId: string,
@@ -71,6 +83,15 @@ export async function makeMove(
 
   if (data.error) {
     return { success: false, error: data.error };
+  }
+
+  // Check if game is over
+  if (data.gameOver) {
+    return { 
+      success: true, 
+      gameOver: true, 
+      outcome: data.outcome as { winner: string; reason: string } 
+    };
   }
 
   return { success: true, newState: data.newState as GameState };

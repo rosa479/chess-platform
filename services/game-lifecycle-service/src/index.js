@@ -1,11 +1,22 @@
 require('dotenv').config();
 
 const express = require('express');
+const cors = require('cors');
 const { createClient } = require('redis');
 const { Chess } = require('chess.js');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
+
+// CORS configuration to allow the frontend (localhost:8080) during development
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
+
 app.use(express.json());
 
 // Server configuration
@@ -50,6 +61,21 @@ app.post('/games', async (req, res) => {
         res.status(201).json({ gameId, initialState: gameState });
     } catch (error) {
         res.status(500).json({ error: 'Failed to create game.' });
+    }
+});
+
+app.get('/games/:gameId', async (req, res) => {
+    const { gameId } = req.params;
+    
+    try {
+        const gameJSON = await redisClient.get(`game:${gameId}`);
+        if (!gameJSON) {
+            return res.status(404).json({ error: 'Game not found.' });
+        }
+        const gameState = JSON.parse(gameJSON);
+        res.status(200).json(gameState);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
