@@ -5,7 +5,8 @@ const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 app.use(express.json());
-const PORT = process.env.PORT || 3012;
+// Rating service port (per currWorking.md it runs on 3002)
+const PORT = process.env.PORT || 3002;
 
 // Redis client
 const redisClient = createClient({ url: process.env.REDIS_URL });

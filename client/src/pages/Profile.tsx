@@ -1,9 +1,51 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { GameHistory } from '@/components/GameHistory';
 import { Trophy, Target, Gamepad2, School, Calendar, Settings } from 'lucide-react';
+import { useAuth } from '@/hooks/use-auth';
+import * as ratingApi from '@/lib/api-rating-service';
 
 const Profile = () => {
+  const { user, isAuthenticated } = useAuth();
+  const [rating, setRating] = useState<ratingApi.Rating | null>(null);
+  const [loadingRating, setLoadingRating] = useState(false);
+  const [ratingError, setRatingError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoadingRating(true);
+        setRatingError(null);
+        const data = await ratingApi.getUserRating(user.userId, "overall");
+        if (!cancelled) {
+          setRating(data);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setRatingError(err.message || "Failed to load rating");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingRating(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, user]);
+
+  const displayName = user?.username ?? "Guest";
+  const displayRating =
+    rating?.rating ?? user?.rating ?? 1500;
+
+  const gamesPlayed = rating?.gamesPlayed ?? user?.gamesPlayed ?? 0;
+  const gamesWon = user?.gamesWon ?? 0;
+
   return (
     <MainLayout>
       <div className="p-4 sm:p-6 md:p-8 max-w-full md:max-w-4xl lg:max-w-6xl mx-auto">
@@ -29,7 +71,7 @@ const Profile = () => {
               {/* User Info */}
               <div className="flex-1 min-w-0">
                 <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center gap-3 truncate">
-                  Noobmaster69
+                  {displayName}
                 </h1>
 
                 <p className="text-muted-foreground mt-1 text-sm sm:text-base truncate">Member since December 2024</p>
@@ -39,7 +81,8 @@ const Profile = () => {
 
                   {/* Rating bubble */}
                   <span className="px-2 sm:px-3 py-1 rounded-full bg-primary/20 text-primary text-xs sm:text-sm font-medium shadow-sm">
-                    Rating: 1523
+                    Rating:{" "}
+                    {loadingRating ? "…" : Math.round(displayRating)}
                   </span>
                   <span className="px-2 sm:px-3 py-1 rounded-full bg-primary/20 text-primary text-xs sm:text-sm font-medium shadow-sm">
                     LBS Hall of Residence
@@ -124,21 +167,56 @@ const Profile = () => {
             <div className="bg-card rounded-xl p-4 sm:p-6">
               <h2 className="font-semibold mb-4">Statistics</h2>
               <div className="space-y-3 sm:space-y-4">
-                {[
-                  { icon: Gamepad2, label: 'Games Played', value: '1,247' },
-                  { icon: Trophy, label: 'Wins', value: '687 (55%)' },
-                  { icon: Target, label: 'Puzzles Solved', value: '2,341' },
-                  { icon: Calendar, label: 'Current Streak', value: '7 days 🔥' },
-                  { icon: School, label: 'Campus Rank', value: '#69' },
-                ].map((stat) => (
-                  <div key={stat.label} className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <stat.icon size={18} className="text-muted-foreground" />
-                      <span className="text-muted-foreground">{stat.label}</span>
-                    </div>
-                    <span className="font-medium text-foreground">{stat.value}</span>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Gamepad2 size={18} className="text-muted-foreground" />
+                    <span className="text-muted-foreground">Games Played</span>
                   </div>
-                ))}
+                  <span className="font-medium text-foreground">
+                    {gamesPlayed}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Trophy size={18} className="text-muted-foreground" />
+                    <span className="text-muted-foreground">Wins</span>
+                  </div>
+                  <span className="font-medium text-foreground">
+                    {gamesWon}
+                    {gamesPlayed > 0
+                      ? ` (${Math.round((gamesWon / gamesPlayed) * 100)}%)`
+                      : ""}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Target size={18} className="text-muted-foreground" />
+                    <span className="text-muted-foreground">Rating Deviation</span>
+                  </div>
+                  <span className="font-medium text-foreground">
+                    {rating ? Math.round(rating.ratingDeviation) : "—"}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Calendar size={18} className="text-muted-foreground" />
+                    <span className="text-muted-foreground">Last Updated</span>
+                  </div>
+                  <span className="font-medium text-foreground text-xs sm:text-sm">
+                    {rating
+                      ? new Date(rating.lastUpdated).toLocaleDateString()
+                      : "—"}
+                  </span>
+                </div>
+
+                {ratingError && (
+                  <div className="text-xs text-destructive bg-destructive/10 p-2 rounded">
+                    {ratingError}
+                  </div>
+                )}
               </div>
             </div>
           </div>

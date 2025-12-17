@@ -1,262 +1,308 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const { createClient } = require('redis');
 const { v4: uuidv4 } = require('uuid');
 
+const fetch = global.fetch || require('node-fetch');
+
 const app = express();
 app.use(express.json());
-const PORT = process.env.PORT || 3003;
 
-// Redis client
-const redisClient = createClient({ url: process.env.REDIS_URL });
-redisClient.on('error', (err) => console.log('Redis Client Error', err));
+// CORS configuration to allow the frontend (localhost:8080) during development
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 
-// Connect to Redis
-(async () => {
-    try {
-        await redisClient.connect();
-        console.log('Connected to Redis for matchmaking service');
-    } catch (err) {
-        console.error('Failed to connect to Redis:', err);
-        process.exit(1);
-    }
-})();
+// Matchmaking service port (per currWorking.md it runs on 3004)
+const PORT = process.env.PORT || 3004;
 
-// Matchmaking queue - stores users waiting for a game
-const matchmakingQueue = new Map();
+/* ================== CONFIG ================== */
 
-// Time controls configuration
 const TIME_CONTROLS = {
-    'bullet': { initialMs: 60000, incrementMs: 0 }, // 1 minute
-    'blitz': { initialMs: 300000, incrementMs: 0 }, // 5 minutes
-    'rapid': { initialMs: 600000, incrementMs: 0 }, // 10 minutes
-    'classical': { initialMs: 1800000, incrementMs: 0 }, // 30 minutes
-    'bullet_increment': { initialMs: 120000, incrementMs: 1000 }, // 2+1
-    'blitz_increment': { initialMs: 300000, incrementMs: 2000 }, // 5+2
-    'rapid_increment': { initialMs: 600000, incrementMs: 5000 }, // 10+5
+  bullet: { initialMs: 60000, incrementMs: 0 },
+  blitz: { initialMs: 300000, incrementMs: 0 },
+  rapid: { initialMs: 600000, incrementMs: 0 },
+  classical: { initialMs: 1800000, incrementMs: 0 },
+  bullet_increment: { initialMs: 120000, incrementMs: 1000 },
+  blitz_increment: { initialMs: 300000, incrementMs: 2000 },
+  rapid_increment: { initialMs: 600000, incrementMs: 5000 },
 };
 
-// Rating difference tolerance for matchmaking
 const RATING_TOLERANCE = 200;
-const MAX_WAIT_TIME = 30000; // 30 seconds
+const MAX_WAIT_TIME = Number(process.env.MAX_WAIT_TIME_MS || 30000);
 
-// Join matchmaking queue
+const REDIS_URL =
+  process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+
+// Game Lifecycle Service now runs on 3003 (use fixed URL for local dev)
+const GAME_SERVICE_URL = 'http://localhost:3003';
+
+/* ================== REDIS ================== */
+
+const redis = createClient({ url: REDIS_URL });
+redis.on('error', err => console.error('Redis error', err));
+
+(async () => {
+  await redis.connect();
+  console.log('✅ Connected to Redis (matchmaking)');
+  console.log(`🔗 Using GAME_SERVICE_URL = ${GAME_SERVICE_URL}`);
+})();
+
+/*
+Redis Keys
+----------
+queue:{timeControl}      -> ZSET  (score = rating, value = userId)
+entry:{userId}           -> HASH  (rating, timeControl, joinedAt)
+lock:{userId}            -> STRING (SET NX PX)
+activeGame:{userId}      -> STRING (gameId for an active game)
+*/
+
+/* ================== API ================== */
+
+// Join matchmaking
 app.post('/matchmaking/join', async (req, res) => {
-    try {
-        const { userId, timeControl, rating } = req.body;
+  try {
+    const { userId, timeControl, rating } = req.body;
 
-        if (!userId || !timeControl || !rating) {
-            return res.status(400).json({ error: 'userId, timeControl, and rating are required' });
-        }
-
-        if (!TIME_CONTROLS[timeControl]) {
-            return res.status(400).json({ error: 'Invalid time control' });
-        }
-
-        // Check if user is already in queue
-        if (matchmakingQueue.has(userId)) {
-            return res.status(409).json({ error: 'User already in matchmaking queue' });
-        }
-
-        // Add user to queue
-        const queueEntry = {
-            userId,
-            timeControl,
-            rating,
-            joinedAt: Date.now(),
-            searchExpanded: false
-        };
-
-        matchmakingQueue.set(userId, queueEntry);
-
-        // Try to find a match immediately
-        const match = await findMatch(userId, timeControl, rating);
-        if (match) {
-            matchmakingQueue.delete(userId);
-            matchmakingQueue.delete(match.opponentId);
-            
-            return res.json({
-                message: 'Match found',
-                gameId: match.gameId,
-                opponent: match.opponent,
-                timeControl: TIME_CONTROLS[timeControl]
-            });
-        }
-
-        res.json({ message: 'Added to matchmaking queue', position: matchmakingQueue.size });
-
-    } catch (error) {
-        console.error('Join matchmaking error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+    if (!userId || !TIME_CONTROLS[timeControl] || typeof rating !== 'number') {
+      return res.status(400).json({ error: 'Invalid input' });
     }
+
+    const exists = await redis.exists(`entry:${userId}`);
+    if (exists) {
+      return res.status(409).json({ error: 'Already in queue' });
+    }
+
+    const joinedAt = Date.now();
+
+    await redis
+      .multi()
+      .hSet(`entry:${userId}`, {
+        userId,
+        rating,
+        timeControl,
+        joinedAt,
+      })
+      .zAdd(`queue:${timeControl}`, {
+        score: rating,
+        value: userId,
+      })
+      .expire(`entry:${userId}`, 120)
+      .exec();
+
+    res.json({ message: 'Added to queue' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
-// Leave matchmaking queue
-app.post('/matchmaking/leave', (req, res) => {
-    try {
-        const { userId } = req.body;
+// Leave matchmaking
+app.post('/matchmaking/leave', async (req, res) => {
+  const { userId } = req.body;
 
-        if (!userId) {
-            return res.status(400).json({ error: 'userId is required' });
-        }
+  const entry = await redis.hGetAll(`entry:${userId}`);
+  if (!entry.timeControl) {
+    return res.json({ success: false });
+  }
 
-        const wasInQueue = matchmakingQueue.has(userId);
-        matchmakingQueue.delete(userId);
+  await redis
+    .multi()
+    .zRem(`queue:${entry.timeControl}`, userId)
+    .del(`entry:${userId}`)
+    .del(`lock:${userId}`)
+    .exec();
 
-        res.json({ 
-            message: wasInQueue ? 'Left matchmaking queue' : 'Not in queue',
-            success: wasInQueue
+  res.json({ success: true });
+});
+
+// Status
+app.get('/matchmaking/status/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  const entry = await redis.hGetAll(`entry:${userId}`);
+
+  // If no queue entry, check if user has an active game
+  if (!entry.timeControl) {
+    const activeGameId = await redis.get(`activeGame:${userId}`);
+    return res.json({
+      inQueue: false,
+      hasGame: !!activeGameId,
+      gameId: activeGameId || null,
+    });
+  }
+
+  res.json({
+    inQueue: true,
+    timeControl: entry.timeControl,
+    rating: Number(entry.rating),
+    waitTime: Date.now() - Number(entry.joinedAt),
+    hasGame: false,
+    gameId: null,
+  });
+});
+
+// Get active game for a user
+app.get('/matchmaking/game/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  const gameId = await redis.get(`activeGame:${userId}`);
+  if (!gameId) {
+    return res.status(404).json({ error: 'No active game for user' });
+  }
+  res.json({ gameId });
+});
+
+// Time controls
+app.get('/matchmaking/time-controls', (_, res) => {
+  res.json(TIME_CONTROLS);
+});
+
+/* ================== MATCHMAKING WORKER ================== */
+
+async function matchmakingLoop() {
+  for (const timeControl of Object.keys(TIME_CONTROLS)) {
+    const users = await redis.zRangeWithScores(
+      `queue:${timeControl}`,
+      0,
+      -1
+    );
+
+    for (const userA of users) {
+      const lockA = await redis.set(`lock:${userA.value}`, '1', {
+        NX: true,
+        PX: 5000,
+      });
+      if (!lockA) continue;
+
+      const entryA = await redis.hGetAll(`entry:${userA.value}`);
+      if (!entryA.timeControl) {
+        await redis.del(`lock:${userA.value}`);
+        continue;
+      }
+
+      const waitTime = Date.now() - Number(entryA.joinedAt);
+      let tolerance = RATING_TOLERANCE;
+
+      if (waitTime > MAX_WAIT_TIME) tolerance *= 3;
+      else if (waitTime > MAX_WAIT_TIME / 2) tolerance *= 2;
+
+      const min = userA.score - tolerance;
+      const max = userA.score + tolerance;
+
+      const candidates = await redis.zRangeByScore(
+        `queue:${timeControl}`,
+        min,
+        max
+      );
+
+      for (const userB of candidates) {
+        if (userB === userA.value) continue;
+
+        const lockB = await redis.set(`lock:${userB}`, '1', {
+          NX: true,
+          PX: 5000,
         });
+        if (!lockB) continue;
 
-    } catch (error) {
-        console.error('Leave matchmaking error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        await createMatch(userA.value, userB, timeControl);
+        return;
+      }
+
+      await redis.del(`lock:${userA.value}`);
     }
-});
-
-// Get queue status
-app.get('/matchmaking/status/:userId', (req, res) => {
-    try {
-        const { userId } = req.params;
-        const queueEntry = matchmakingQueue.get(userId);
-
-        if (!queueEntry) {
-            return res.json({ inQueue: false });
-        }
-
-        const waitTime = Date.now() - queueEntry.joinedAt;
-        const queueSize = matchmakingQueue.size;
-
-        res.json({
-            inQueue: true,
-            waitTime,
-            queueSize,
-            timeControl: queueEntry.timeControl,
-            rating: queueEntry.rating
-        });
-
-    } catch (error) {
-        console.error('Get queue status error:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-// Get all time controls
-app.get('/matchmaking/time-controls', (req, res) => {
-    res.json(TIME_CONTROLS);
-});
-
-// Find a match for a user
-async function findMatch(userId, timeControl, rating) {
-    const queueEntry = matchmakingQueue.get(userId);
-    if (!queueEntry) return null;
-
-    const currentTime = Date.now();
-    const waitTime = currentTime - queueEntry.joinedAt;
-    
-    // Expand search tolerance if user has been waiting
-    let tolerance = RATING_TOLERANCE;
-    if (waitTime > MAX_WAIT_TIME / 2) {
-        tolerance = RATING_TOLERANCE * 2;
-    }
-    if (waitTime > MAX_WAIT_TIME) {
-        tolerance = RATING_TOLERANCE * 3;
-    }
-
-    // Find potential opponents
-    for (const [opponentId, opponentEntry] of matchmakingQueue.entries()) {
-        if (opponentId === userId) continue;
-        if (opponentEntry.timeControl !== timeControl) continue;
-
-        const ratingDiff = Math.abs(rating - opponentEntry.rating);
-        if (ratingDiff <= tolerance) {
-            // Found a match!
-            const gameId = uuidv4();
-            
-            // Determine who plays white (random or higher rated)
-            const whitePlayerId = Math.random() > 0.5 ? userId : opponentId;
-            const blackPlayerId = whitePlayerId === userId ? opponentId : userId;
-
-            // Create game via game-lifecycle-service
-            try {
-                const gameResponse = await fetch('http://localhost:3002/games', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        whitePlayerId,
-                        blackPlayerId,
-                        timeControl: TIME_CONTROLS[timeControl]
-                    })
-                });
-
-                if (!gameResponse.ok) {
-                    console.error('Failed to create game:', await gameResponse.text());
-                    return null;
-                }
-
-                const gameData = await gameResponse.json();
-
-                // Get opponent info from user service
-                const opponentResponse = await fetch(`http://localhost:3001/users/${opponentId}`);
-                const opponent = opponentResponse.ok ? await opponentResponse.json() : { userId: opponentId, username: 'Unknown' };
-
-                return {
-                    gameId: gameData.gameId,
-                    opponentId,
-                    opponent: {
-                        userId: opponent.userId,
-                        username: opponent.username,
-                        rating: opponent.rating
-                    },
-                    timeControl: TIME_CONTROLS[timeControl]
-                };
-
-            } catch (error) {
-                console.error('Error creating game:', error);
-                return null;
-            }
-        }
-    }
-
-    return null;
+  }
 }
 
-// Periodic matchmaking check
-setInterval(async () => {
-    const currentTime = Date.now();
-    
-    for (const [userId, queueEntry] of matchmakingQueue.entries()) {
-        const waitTime = currentTime - queueEntry.joinedAt;
-        
-        // Remove users who have been waiting too long
-        if (waitTime > MAX_WAIT_TIME * 2) {
-            console.log(`Removing user ${userId} from queue after ${waitTime}ms`);
-            matchmakingQueue.delete(userId);
-            continue;
-        }
+async function createMatch(userA, userB, timeControl) {
+  const white = Math.random() > 0.5 ? userA : userB;
+  const black = white === userA ? userB : userA;
 
-        // Try to find a match
-        const match = await findMatch(userId, queueEntry.timeControl, queueEntry.rating);
-        if (match) {
-            console.log(`Match found: ${userId} vs ${match.opponentId}`);
-            matchmakingQueue.delete(userId);
-            matchmakingQueue.delete(match.opponentId);
-            
-            // Notify both players via WebSocket (this would be handled by the gateway)
-            // For now, we'll just log it
-        }
-    }
-}, 2000); // Check every 2 seconds
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
 
-// Health check
-app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'healthy', 
-        service: 'matchmaking-service',
-        queueSize: matchmakingQueue.size
+  try {
+    const url = `${GAME_SERVICE_URL}/games`;
+    const payload = {
+      whitePlayerId: white,
+      blackPlayerId: black,
+      timeControl: TIME_CONTROLS[timeControl],
+    };
+
+    console.log('🎯 Creating game via game-lifecycle service', {
+      url,
+      payload,
     });
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      const errorBody = await res.text().catch(() => '<no body>');
+      console.error('❌ Game service responded with error', {
+        status: res.status,
+        statusText: res.statusText,
+        body: errorBody,
+      });
+      throw new Error('Game service error');
+    }
+
+    const body = await res.json().catch(() => null);
+    const gameId = body?.gameId;
+
+    if (!gameId) {
+      console.error('Game service did not return gameId');
+      throw new Error('Game service did not return gameId');
+    }
+
+    // Remove players from queue and record their active game
+    await redis
+      .multi()
+      .zRem(`queue:${timeControl}`, userA, userB)
+      .del(`entry:${userA}`, `entry:${userB}`)
+      .del(`lock:${userA}`, `lock:${userB}`)
+      .set(`activeGame:${userA}`, gameId, { EX: 60 * 60 })
+      .set(`activeGame:${userB}`, gameId, { EX: 60 * 60 })
+      .exec();
+
+    console.log(`♟️ Match created: ${userA} vs ${userB} -> game ${gameId}`);
+  } catch (err) {
+    console.error('❌ Match creation failed', err.message);
+    await redis.del(`lock:${userA}`, `lock:${userB}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/* ================== LOOP ================== */
+
+let isRunning = false;
+
+setInterval(async () => {
+  if (isRunning) return;
+  isRunning = true;
+  try {
+    await matchmakingLoop();
+  } finally {
+    isRunning = false;
+  }
+}, 1000);
+
+/* ================== HEALTH ================== */
+
+app.get('/health', (_, res) => {
+  res.json({ status: 'healthy' });
 });
 
+/* ================== BOOT ================== */
+
 app.listen(PORT, () => {
-    console.log(`Matchmaking Service listening on port ${PORT}`);
+  console.log(`♟️ Matchmaking service running on ${PORT}`);
 });

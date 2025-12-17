@@ -24,7 +24,7 @@ interface SidebarProps {
 }
 
 const navItems = [
-  { icon: Gamepad2, label: 'Play', path: '/' },
+  { icon: Gamepad2, label: 'Play', path: '/play' },
   { icon: Puzzle, label: 'Puzzles', path: '/puzzles' },
   { icon: GraduationCap, label: 'Learn', path: '/learn' },
   { icon: Eye, label: 'Watch', path: '/watch' },
