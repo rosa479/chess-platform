@@ -330,7 +330,7 @@ const Game = () => {
     try {
       const result = await gameApi.makeMove(gameId, user.userId, move);
       
-      if (!result.success) {
+      if (result.success === false) {
         toast({
           title: 'Invalid move',
           description: result.error || 'Cannot make that move',
@@ -368,10 +368,6 @@ const Game = () => {
             ? `Game ended in a draw by ${result.outcome.reason}`
             : `${result.outcome.winner} wins by ${result.outcome.reason}`,
         });
-        // Update game state to show final position
-        if ('newState' in result && result.newState) {
-          setGameState(result.newState);
-        }
         return;
       }
 

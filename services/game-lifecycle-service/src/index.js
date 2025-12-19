@@ -8,16 +8,27 @@ const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 
-// CORS configuration to allow the frontend (localhost:8080) during development
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+// CORS configuration - allow all origins in development
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN || true, // Allow all origins in development
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+};
+app.use(cors(corsOptions));
 
 app.use(express.json());
+
+// Log all incoming requests for debugging
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', service: 'game-lifecycle-service' });
+});
 
 // Server configuration
 const PORT = process.env.PORT || 3003;
@@ -43,7 +54,21 @@ const messageBus = {
 
 app.post('/games', async (req, res) => {
     try {
+        console.log('📥 POST /games - Request body:', JSON.stringify(req.body, null, 2));
+        
         const { whitePlayerId, blackPlayerId, timeControl } = req.body;
+        
+        // Validate required fields
+        if (!whitePlayerId || !blackPlayerId) {
+            console.error('❌ Missing required fields: whitePlayerId or blackPlayerId');
+            return res.status(400).json({ error: 'whitePlayerId and blackPlayerId are required' });
+        }
+        
+        if (!timeControl || typeof timeControl.initialMs !== 'number') {
+            console.error('❌ Invalid timeControl:', timeControl);
+            return res.status(400).json({ error: 'timeControl with initialMs is required' });
+        }
+        
         const gameId = uuidv4();
         const chess = new Chess();
 
@@ -58,9 +83,11 @@ app.post('/games', async (req, res) => {
         };
 
         await redisClient.set(`game:${gameId}`, JSON.stringify(gameState));
+        console.log(`✅ Game created: ${gameId} for ${whitePlayerId} vs ${blackPlayerId}`);
         res.status(201).json({ gameId, initialState: gameState });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to create game.' });
+        console.error('❌ Error creating game:', error);
+        res.status(500).json({ error: 'Failed to create game.', details: error.message });
     }
 });
 
@@ -187,11 +214,32 @@ function getWinner(chess) {
     return 'draw';
 }
 
+// 404 handler - must be after all routes
+app.use((req, res) => {
+  console.log(`404: ${req.method} ${req.path}`);
+  res.status(404).json({ error: 'Route not found', path: req.path });
+});
+
 async function startServer() {
-    await redisClient.connect();
+    try {
+        await redisClient.connect();
+        console.log('✅ Connected to Redis (game-lifecycle-service)');
+    } catch (error) {
+        console.error('❌ Failed to connect to Redis:', error);
+        process.exit(1);
+    }
+    
     app.listen(PORT, () => {
         console.log(`♟️ Game Lifecycle Service running on port ${PORT}`);
+        console.log(`Available routes:`);
+        console.log(`  GET  /health`);
+        console.log(`  POST /games`);
+        console.log(`  GET  /games/:gameId`);
+        console.log(`  POST /games/:gameId/move`);
     });
 }
 
-startServer();
+startServer().catch(error => {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
+});

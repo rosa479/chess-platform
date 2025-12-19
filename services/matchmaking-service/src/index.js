@@ -11,13 +11,19 @@ const app = express();
 app.use(express.json());
 
 // CORS configuration
-app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:8080',
-    methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN || true, // Allow all origins in development
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+};
+app.use(cors(corsOptions));
+
+// Log all incoming requests for debugging
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
 
 const PORT = process.env.PORT || 3004;
 
@@ -34,17 +40,32 @@ const TIME_CONTROLS = {
 };
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-const GAME_SERVICE_URL = process.env.GAME_SERVICE_URL || 'http://localhost:3003';
+// Game lifecycle service runs on port 3003 (per currWorking.md)
+// IMPORTANT: We hardcode localhost:3003 here to avoid stale or conflicting GAME_SERVICE_URL env vars
+const GAME_SERVICE_URL = 'http://localhost:3003';
+
+// Log configuration on startup
+console.log(`🔗 GAME_SERVICE_URL = ${GAME_SERVICE_URL}`);
+console.log(`🔗 REDIS_URL = ${REDIS_URL}`);
 
 /* ================== REDIS ================== */
 
 const redis = createClient({ url: REDIS_URL });
 redis.on('error', err => console.error('Redis error', err));
 
+// Track if Redis is connected
+let redisConnected = false;
+
 (async () => {
-  await redis.connect();
-  console.log('✅ Connected to Redis (matchmaking)');
-  console.log(`🔗 Using GAME_SERVICE_URL = ${GAME_SERVICE_URL}`);
+  try {
+    await redis.connect();
+    redisConnected = true;
+    console.log('✅ Connected to Redis (matchmaking)');
+    console.log(`🔗 Using GAME_SERVICE_URL = ${GAME_SERVICE_URL}`);
+  } catch (error) {
+    console.error('❌ Failed to connect to Redis:', error);
+    process.exit(1);
+  }
 })();
 
 /* ================== API ================== */
@@ -150,12 +171,32 @@ app.get('/matchmaking/status/:userId', async (req, res) => {
 
 // Get active game for a user
 app.get('/matchmaking/game/:userId', async (req, res) => {
-  const userId = req.params.userId;
-  const gameId = await redis.get(`activeGame:${userId}`);
-  if (!gameId) {
-    return res.status(404).json({ error: 'No active game for user' });
+  try {
+    console.log(`🔍 GET /matchmaking/game/:userId - userId: ${req.params.userId}`);
+    const userId = req.params.userId;
+    if (!userId) {
+      console.error('❌ Missing userId parameter');
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+    
+    console.log(`🔎 Checking Redis for activeGame:${userId}`);
+    const gameId = await redis.get(`activeGame:${userId}`);
+    console.log(`📊 Redis result for activeGame:${userId}:`, gameId);
+    
+    if (!gameId) {
+      console.log(`⚠️ No active game found for user ${userId} - returning 404`);
+      res.status(404).json({ error: 'No active game for user' });
+      return;
+    }
+    
+    console.log(`✅ Found active game ${gameId} for user ${userId} - returning 200`);
+    res.json({ gameId });
+  } catch (err) {
+    console.error('❌ Error getting active game:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error', details: err.message });
+    }
   }
-  res.json({ gameId });
 });
 
 // Time controls
@@ -167,49 +208,53 @@ app.get('/matchmaking/time-controls', (_, res) => {
 
 async function matchmakingLoop() {
   for (const timeControl of Object.keys(TIME_CONTROLS)) {
-    // Fetch users in queue for this time control
-    const users = await redis.zRangeWithScores(
-      `queue:${timeControl}`,
-      0,
-      -1
-    );
-
-    if (users.length < 2) continue;
-
-    const locks = [];
     try {
-      // Naive implementation: Pair first two available
-      // (Improvements: scan for similar ratings)
+      // Fetch users in queue for this time control
+      const users = await redis.zRangeWithScores(
+        `queue:${timeControl}`,
+        0,
+        -1
+      );
+
+      if (users.length < 2) {
+        if (users.length > 0) {
+          console.log(`⏳ Queue '${timeControl}' has ${users.length} user(s), waiting for more...`);
+        }
+        continue;
+      }
+
+      console.log(`🎯 Found ${users.length} users in queue '${timeControl}', attempting to match...`);
+
+      // Naive implementation: pair the first two users in this queue
       const [userA, userB] = users;
 
-      // Lock both users to prevent double-pairing
-      const lockA = await redis.set(`lock:${userA.value}`, '1', { NX: true, PX: 5000 });
-      const lockB = await redis.set(`lock:${userB.value}`, '1', { NX: true, PX: 5000 });
-      
-      if (!lockA || !lockB) {
-        // Failed to lock one, release whoever we locked and retry next tick
-        if (lockA) await redis.del(`lock:${userA.value}`);
-        if (lockB) await redis.del(`lock:${userB.value}`);
-        continue; 
-      }
-      
-      locks.push(`lock:${userA.value}`, `lock:${userB.value}`);
+      const locks = [];
+      try {
+        // Lock both users to prevent double-pairing
+        const lockA = await redis.set(`lock:${userA.value}`, '1', { NX: true, PX: 5000 });
+        const lockB = await redis.set(`lock:${userB.value}`, '1', { NX: true, PX: 5000 });
 
-      const entryA = await redis.hGetAll(`entry:${userA.value}`);
-      const entryB = await redis.hGetAll(`entry:${userB.value}`);
+        if (!lockA || !lockB) {
+          // Failed to lock one, release whoever we locked and retry next tick
+          if (lockA) await redis.del(`lock:${userA.value}`);
+          if (lockB) await redis.del(`lock:${userB.value}`);
+          continue;
+        }
 
-      // Integrity check
-      if (!entryA.timeControl || !entryB.timeControl) continue;
-      if (entryA.timeControl === timeControl && entryB.timeControl === timeControl) {
+        locks.push(`lock:${userA.value}`, `lock:${userB.value}`);
+
+        console.log(`✅ Matching users ${userA.value} vs ${userB.value} for ${timeControl}`);
         await createMatch(userA.value, userB.value, timeControl);
+      } catch (err) {
+        console.error('Matchmaking loop error:', err);
+      } finally {
+        // Always release locks
+        for (const key of locks) {
+          await redis.del(key);
+        }
       }
     } catch (err) {
-      console.error('Matchmaking loop error:', err);
-    } finally {
-      // Always release locks
-      for (const key of locks) {
-        await redis.del(key);
-      }
+      console.error(`❌ Error processing queue '${timeControl}':`, err);
     }
   }
 }
@@ -234,7 +279,9 @@ async function createMatch(userA, userB, timeControl) {
       autoStart: false                     // Explicit flag if your Game Service supports it
     };
 
-    console.log('🎯 Creating game via game-lifecycle service', { url, payload });
+    console.log('🎯 Creating game via game-lifecycle service');
+    console.log(`   URL: ${url}`);
+    console.log(`   Payload:`, JSON.stringify(payload, null, 2));
 
     const res = await fetch(url, {
       method: 'POST',
@@ -243,8 +290,12 @@ async function createMatch(userA, userB, timeControl) {
       body: JSON.stringify(payload),
     });
 
+    console.log(`📡 Response status: ${res.status} ${res.statusText}`);
+    
     if (!res.ok) {
-      throw new Error(`Game Service Error: ${res.statusText}`);
+      const errorText = await res.text().catch(() => 'No error details');
+      console.error(`❌ Game Service Error Response:`, errorText);
+      throw new Error(`Game Service Error: ${res.status} ${res.statusText} - ${errorText}`);
     }
 
     const body = await res.json().catch(() => null);
@@ -278,10 +329,12 @@ async function createMatch(userA, userB, timeControl) {
 
 let isRunning = false;
 setInterval(async () => {
-  if (isRunning) return;
+  if (!redisConnected || isRunning) return;
   isRunning = true;
   try {
     await matchmakingLoop();
+  } catch (err) {
+    console.error('❌ Matchmaking loop error:', err);
   } finally {
     isRunning = false;
   }
@@ -293,8 +346,24 @@ app.get('/health', (_, res) => {
   res.json({ status: 'healthy' });
 });
 
+/* ================== 404 HANDLER ================== */
+
+app.use((req, res) => {
+  console.log(`404: ${req.method} ${req.path}`);
+  res.status(404).json({ error: 'Route not found', path: req.path });
+});
+
 /* ================== BOOT ================== */
 
 app.listen(PORT, () => {
-  console.log(`♟️ Matchmaking service running on ${PORT}`);
+  console.log(`♟️ Matchmaking service running on port ${PORT}`);
+  console.log(`Available routes:`);
+  console.log(`  GET  /health`);
+  console.log(`  GET  /matchmaking/time-controls`);
+  console.log(`  GET  /matchmaking/status/:userId`);
+  console.log(`  GET  /matchmaking/game/:userId`);
+  console.log(`  POST /matchmaking/join`);
+  console.log(`  POST /matchmaking/leave`);
+  console.log(`  POST /matchmaking/clear-active-game`);
+  console.log(`\n✅ All routes registered successfully`);
 });
