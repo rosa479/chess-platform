@@ -2,8 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { createClient } = require('redis');
+const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
+const User = require('./models/User');
 
 const app = express();
 app.use(express.json());
@@ -22,20 +23,14 @@ const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
 
-// Redis client for user data
-const redisClient = createClient({ url: process.env.REDIS_URL });
-redisClient.on('error', (err) => console.log('Redis Client Error', err));
-
-// Connect to Redis
-(async () => {
-    try {
-        await redisClient.connect();
-        console.log('Connected to Redis for user service');
-    } catch (err) {
-        console.error('Failed to connect to Redis:', err);
+// MongoDB connection
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/chess-users')
+    .then(() => {
+        console.log('Connected to MongoDB for user service');
+    }).catch((error) => {
+        console.error('Failed to connect to MongoDB:', error);
         process.exit(1);
-    }
-})();
+    });
 
 // User registration
 app.post('/auth/register', async (req, res) => {
@@ -48,32 +43,28 @@ app.post('/auth/register', async (req, res) => {
         }
 
         // Check if user already exists
-        const existingUser = await redisClient.get(`user:${username}`);
+        const existingUser = await User.findOne({ $or: [ { username }, { email } ] });
         if (existingUser) {
-            return res.status(409).json({ error: 'Username already exists' });
+            return res.status(409).json({ error: 'Username or email already exists' });
         }
 
         // Hash password
         const saltRounds = 10;
         const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-        // Create user object
+        // Create user
         const userId = uuidv4();
-        const user = {
+        const user = new User({
             userId,
             username,
             email,
             password: hashedPassword,
-            rating: 1200, // Default rating
+            rating: 1200,
             gamesPlayed: 0,
             gamesWon: 0,
-            createdAt: new Date().toISOString(),
-            isOnline: false
-        };
-
-        // Store user in Redis
-        await redisClient.set(`user:${username}`, JSON.stringify(user));
-        await redisClient.set(`user:${userId}`, JSON.stringify(user));
+            isOnline: false,
+        });
+        await user.save();
 
         // Generate JWT token
         const token = jwt.sign(
@@ -83,14 +74,12 @@ app.post('/auth/register', async (req, res) => {
         );
 
         // Remove password from response
-        const { password: _, ...userResponse } = user;
-
+        const { password: _, ...userResponse } = user.toObject();
         res.status(201).json({
             message: 'User created successfully',
             user: userResponse,
             token
         });
-
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -106,13 +95,11 @@ app.post('/auth/login', async (req, res) => {
             return res.status(400).json({ error: 'Username and password are required' });
         }
 
-        // Get user from Redis
-        const userData = await redisClient.get(`user:${username}`);
-        if (!userData) {
+        // Get user from MongoDB
+        const user = await User.findOne({ username });
+        if (!user) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
-
-        const user = JSON.parse(userData);
 
         // Verify password
         const isValidPassword = await bcrypt.compare(password, user.password);
@@ -122,8 +109,7 @@ app.post('/auth/login', async (req, res) => {
 
         // Update online status
         user.isOnline = true;
-        await redisClient.set(`user:${username}`, JSON.stringify(user));
-        await redisClient.set(`user:${user.userId}`, JSON.stringify(user));
+        await user.save();
 
         // Generate JWT token
         const token = jwt.sign(
@@ -133,7 +119,7 @@ app.post('/auth/login', async (req, res) => {
         );
 
         // Remove password from response
-        const { password: _, ...userResponse } = user;
+        const { password: _, ...userResponse } = user.toObject();
 
         res.json({
             message: 'Login successful',
@@ -151,15 +137,11 @@ app.post('/auth/login', async (req, res) => {
 app.get('/users/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
-        const userData = await redisClient.get(`user:${userId}`);
-        
-        if (!userData) {
+        const user = await User.findOne({ userId });
+        if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
-
-        const user = JSON.parse(userData);
-        const { password: _, ...userResponse } = user;
-
+        const { password: _, ...userResponse } = user.toObject();
         res.json(userResponse);
     } catch (error) {
         console.error('Get user error:', error);
@@ -172,31 +154,21 @@ app.put('/users/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
         const updates = req.body;
-
-        const userData = await redisClient.get(`user:${userId}`);
-        if (!userData) {
+        
+        const user = await User.findOne({ userId });
+        if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
-
-        const user = JSON.parse(userData);
         
-        // Update allowed fields
         const allowedUpdates = ['email', 'isOnline'];
-        const updatedUser = { ...user };
-        
         allowedUpdates.forEach(field => {
             if (updates[field] !== undefined) {
-                updatedUser[field] = updates[field];
+                user[field] = updates[field];
             }
         });
-
-        // Save updated user
-        await redisClient.set(`user:${user.username}`, JSON.stringify(updatedUser));
-        await redisClient.set(`user:${userId}`, JSON.stringify(updatedUser));
-
-        const { password: _, ...userResponse } = updatedUser;
+        await user.save();
+        const { password: _, ...userResponse } = user.toObject();
         res.json(userResponse);
-
     } catch (error) {
         console.error('Update user error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -207,29 +179,20 @@ app.put('/users/:userId', async (req, res) => {
 app.post('/users/:userId/game-result', async (req, res) => {
     try {
         const { userId } = req.params;
-        const { result, ratingChange } = req.body; // result: 'win', 'loss', 'draw'
+        const { result, ratingChange } = req.body;
 
-        const userData = await redisClient.get(`user:${userId}`);
-        if (!userData) {
+        const user = await User.findOne({ userId });
+        if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
-
-        const user = JSON.parse(userData);
-        
-        // Update stats
         user.gamesPlayed += 1;
         if (result === 'win') {
             user.gamesWon += 1;
         }
         user.rating += ratingChange || 0;
-
-        // Save updated user
-        await redisClient.set(`user:${user.username}`, JSON.stringify(user));
-        await redisClient.set(`user:${userId}`, JSON.stringify(user));
-
-        const { password: _, ...userResponse } = user;
+        await user.save();
+        const { password: _, ...userResponse } = user.toObject();
         res.json(userResponse);
-
     } catch (error) {
         console.error('Update game result error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -240,29 +203,8 @@ app.post('/users/:userId/game-result', async (req, res) => {
 app.get('/leaderboard', async (req, res) => {
     try {
         const { limit = 10 } = req.query;
-        
-        // Get all users (in a real app, you'd use a sorted set for better performance)
-        const keys = await redisClient.keys('user:*');
-        const users = [];
-
-        for (const key of keys) {
-            const userData = await redisClient.get(key);
-            if (userData) {
-                const user = JSON.parse(userData);
-                // Skip if this is a username key (we want userId keys)
-                if (user.userId) {
-                    const { password: _, ...userResponse } = user;
-                    users.push(userResponse);
-                }
-            }
-        }
-
-        // Sort by rating and limit
-        users.sort((a, b) => b.rating - a.rating);
-        const leaderboard = users.slice(0, parseInt(limit));
-
-        res.json(leaderboard);
-
+        const users = await User.find({}, '-password').sort({ rating: -1 }).limit(Number(limit));
+        res.json(users);
     } catch (error) {
         console.error('Get leaderboard error:', error);
         res.status(500).json({ error: 'Internal server error' });
