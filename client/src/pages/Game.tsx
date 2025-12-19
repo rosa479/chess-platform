@@ -241,17 +241,8 @@ const Game = () => {
     return () => clearInterval(interval);
   }, [gameId, isAuthenticated, gameOver, gameNotFound]);
 
-  // Show Game Over notification whenever gameOver becomes true
-  useEffect(() => {
-    if (gameOver) {
-      toast({
-        title: 'Game Over',
-        description: gameOver.winner === 'draw'
-          ? `Game ended in a draw by ${gameOver.reason}`
-          : `${gameOver.winner} wins by ${gameOver.reason}`,
-      });
-    }
-  }, [gameOver]);
+  // No toast: show modal for game over
+
 
   // Track last move timestamp to prevent unnecessary timer restarts
   const lastMoveTimestampRef = useRef<number>(0);
@@ -546,16 +537,36 @@ const Game = () => {
 
             {/* Game over message */}
             {gameOver && (
-              <div className="text-center p-4 bg-card border border-border rounded-lg">
-                <div className="text-xl font-bold mb-2">Game Over</div>
-                <div className="text-muted-foreground">
-                  {gameOver.winner === 'draw' 
-                    ? `Draw by ${gameOver.reason}`
-                    : `${gameOver.winner === 'white' ? whitePlayerName : blackPlayerName} wins by ${gameOver.reason}`
-                  }
-                </div>
-              </div>
-            )}
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
+    <div className="relative bg-card border border-border rounded-lg shadow-lg max-w-full w-[380px] text-center p-6 animate-pop">
+      <div className="text-2xl font-extrabold mb-3 text-primary">Game Over</div>
+      <div className="mb-4">
+        {gameOver.winner === 'draw' ? (
+          <div className="text-lg font-semibold mb-1">
+            Draw by <span className="capitalize">{gameOver.reason}</span>
+          </div>
+        ) : (
+          <>
+            <div className="text-lg font-semibold mb-1">
+              Winner: <span className="text-green-700 font-bold">{gameOver.winner === 'white' ? whitePlayerName : blackPlayerName}</span>
+            </div>
+            <div className="text-base mb-1">Loser: <span className="text-destructive font-bold">{gameOver.winner === 'white' ? blackPlayerName : whitePlayerName}</span></div>
+            <div className="text-sm text-muted-foreground mb-2">by <span className="capitalize">{gameOver.reason}</span></div>
+          </>
+        )}
+      </div>
+      <div className="flex gap-3 justify-center mt-2">
+        <button className="px-4 py-2 rounded bg-primary text-primary-foreground font-bold hover:bg-primary/90 transition-all" onClick={() => navigate('/play')}>
+          Home
+        </button>
+        <button className="px-4 py-2 rounded bg-secondary text-secondary-foreground border font-semibold hover:bg-secondary/70 transition-all" onClick={() => navigate('/match/new')}>
+          Play Again
+        </button>
+      </div>
+      <button aria-label="Close" onClick={() => navigate('/play')} className="absolute top-2 right-2 text-lg text-muted-foreground hover:text-primary">&times;</button>
+    </div>
+  </div>
+)}
           </div>
         </div>
 

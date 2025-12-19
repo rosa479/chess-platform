@@ -5,6 +5,7 @@ const cors = require('cors');
 const { createClient } = require('redis');
 const { Chess } = require('chess.js');
 const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
 
 const app = express();
 
@@ -145,12 +146,12 @@ async function handlePlayerMove(gameId, playerId, move) {
     if (turn === 'w') {
         gameState.whiteTimeLeftMs -= timeElapsed;
         if (gameState.whiteTimeLeftMs <= 0) {
-            return handleGameOver(gameState, chess, 'timeout', 'black'); // Black wins
+            return await handleGameOver(gameState, chess, 'timeout', 'black'); // Black wins
         }
     } else {
         gameState.blackTimeLeftMs -= timeElapsed;
         if (gameState.blackTimeLeftMs <= 0) {
-            return handleGameOver(gameState, chess, 'timeout', 'white'); // White wins
+            return await handleGameOver(gameState, chess, 'timeout', 'white'); // White wins
         }
     }
 
@@ -165,9 +166,9 @@ async function handlePlayerMove(gameId, playerId, move) {
     gameState.lastMoveTimestamp = timeNow;
 
     // 6. Check for game termination (checkmate, stalemate, etc.)
-    if (chess.isGameOver()) {
-        return handleGameOver(gameState, chess, getTerminationReason(chess), getWinner(chess));
-    }
+if (chess.isGameOver()) {
+    return await handleGameOver(gameState, chess, getTerminationReason(chess), getWinner(chess));
+}
 
     // 7. Save the updated state back to Redis
     await redisClient.set(`game:${gameId}`, JSON.stringify(gameState));
@@ -176,7 +177,7 @@ async function handlePlayerMove(gameId, playerId, move) {
     return { success: true, newState: gameState };
 }
 
-function handleGameOver(gameState, chess, reason, winner) {
+async function handleGameOver(gameState, chess, reason, winner) {
     const eventPayload = {
         gameId: gameState.gameId,
         whitePlayerId: gameState.whitePlayerId,
@@ -184,9 +185,35 @@ function handleGameOver(gameState, chess, reason, winner) {
         outcome: { winner, reason }, // winner: 'white', 'black', or 'draw'
         pgn: chess.pgn()
     };
-
     // Publish the event for other services (user-service, analysis-service)
     messageBus.publish('game.finished', eventPayload);
+
+    // --- Update user stats ---
+    const userServiceBase = process.env.USER_SERVICE_URL || 'http://localhost:3001';
+    const gameResultPath = (userId) => `${userServiceBase}/users/${userId}/game-result`;
+    // Prepare results
+    let whiteResult = 'loss';
+    let blackResult = 'loss';
+    if (winner === 'white') {
+        whiteResult = 'win'; blackResult = 'loss';
+    } else if (winner === 'black') {
+        whiteResult = 'loss'; blackResult = 'win';
+    } else if (winner === 'draw') {
+        whiteResult = 'draw'; blackResult = 'draw';
+    }
+    // Update players
+    (async () => {
+      try {
+        await axios.post(gameResultPath(gameState.whitePlayerId), { result: whiteResult });
+      } catch (err) {
+        console.error('Failed to update white player stats:', err?.response?.data || err.message);
+      }
+      try {
+        await axios.post(gameResultPath(gameState.blackPlayerId), { result: blackResult });
+      } catch (err) {
+        console.error('Failed to update black player stats:', err?.response?.data || err.message);
+      }
+    })();
 
     // Clean up the active game state from Redis
     redisClient.del(`game:${gameState.gameId}`);

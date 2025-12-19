@@ -26,11 +26,8 @@ interface SidebarProps {
 const navItems = [
   { icon: Gamepad2, label: 'Play', path: '/play' },
   { icon: Puzzle, label: 'Puzzles', path: '/puzzles' },
-  { icon: GraduationCap, label: 'Learn', path: '/learn' },
-  { icon: Eye, label: 'Watch', path: '/watch' },
-  { icon: Users, label: 'Community', path: '/community' },
-  { icon: Wrench, label: 'Tools', path: '/tools' },
   { icon: User, label: 'Profile', path: '/profile' },
+  { icon: Crown, label: 'Leaderboard', path: '/leaderboard' },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ className, showCloseButton }) => {

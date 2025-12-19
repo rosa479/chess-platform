@@ -7,10 +7,7 @@ import Index from "./pages/Index";
 import Matchmaking from "./pages/Matchmaking";
 import Game from "./pages/Game";
 import Puzzles from "./pages/Puzzles";
-import Learn from "./pages/Learn";
-import Watch from "./pages/Watch";
-import Community from "./pages/Community";
-import Tools from "./pages/Tools";
+import Leaderboard from "./pages/Leaderboard";
 import Profile from "./pages/Profile";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -25,14 +22,11 @@ const App = () => (
       <Sonner />
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
-          <Route path="/" element={<Index />} />
+          <Route path="/" element={<Matchmaking />} />
           <Route path="/play" element={<Matchmaking />} />
           <Route path="/game/:gameId" element={<Game />} />
           <Route path="/puzzles" element={<Puzzles />} />
-          <Route path="/learn" element={<Learn />} />
-          <Route path="/watch" element={<Watch />} />
-          <Route path="/community" element={<Community />} />
-          <Route path="/tools" element={<Tools />} />
+          <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />

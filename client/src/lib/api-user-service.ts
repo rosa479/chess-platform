@@ -7,6 +7,10 @@ export type User = {
   username: string;
   email: string;
   rating: number;
+  bullet: number;
+  blitz: number;
+  rapid: number;
+  puzzles: number;
   gamesPlayed: number;
   gamesWon: number;
   createdAt: string;
@@ -46,5 +50,27 @@ export async function getUserById(userId: string): Promise<User> {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Failed to get user');
   return data as User;
+}
+
+export async function updateUser(userId: string, updates: Partial<User>, token: string) {
+  const res = await fetch(`${USER_SERVICE_URL}/users/${userId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify(updates),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to update user');
+  return data as User;
+}
+
+const GAME_HISTORY_SERVICE_URL = import.meta.env.VITE_GAME_HISTORY_SERVICE_URL || 'http://localhost:3013';
+
+export async function getUserGames(userId: string, limit = 10) {
+  const res = await fetch(`${GAME_HISTORY_SERVICE_URL}/users/${userId}/games?limit=${limit}`);
+  if (!res.ok) throw new Error('Failed to fetch game history');
+  return await res.json();
 }
 

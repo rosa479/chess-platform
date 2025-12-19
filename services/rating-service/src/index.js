@@ -1,27 +1,26 @@
 require('dotenv').config();
 const express = require('express');
-const { createClient } = require('redis');
+const cors = require('cors');
+const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
+const Rating = require('./models/Rating');
+const User = require('./models/User');
 
 const app = express();
+app.use(cors({ origin: 'http://localhost:8080' }));
 app.use(express.json());
 // Rating service port (per currWorking.md it runs on 3002)
 const PORT = process.env.PORT || 3002;
 
-// Redis client
-const redisClient = createClient({ url: process.env.REDIS_URL });
-redisClient.on('error', (err) => console.log('Redis Client Error', err));
-
-// Connect to Redis
-(async () => {
-    try {
-        await redisClient.connect();
-        console.log('Connected to Redis for rating service');
-    } catch (err) {
-        console.error('Failed to connect to Redis:', err);
+// MongoDB connection
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/chess-rating')
+    .then(() => {
+        console.log('Connected to MongoDB for rating service');
+    })
+    .catch((error) => {
+        console.error('Failed to connect to MongoDB:', error);
         process.exit(1);
-    }
-})();
+    });
 
 // Glicko-2 constants
 const TAU = 0.0833; // System constant
@@ -152,26 +151,21 @@ class Glicko2Rating {
 app.get('/ratings/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
-        const { timeControl } = req.query;
-        
-        const ratingKey = timeControl ? `rating:${userId}:${timeControl}` : `rating:${userId}:overall`;
-        const ratingData = await redisClient.get(ratingKey);
-        
-        if (!ratingData) {
-            // Return default rating
-            const defaultRating = new Glicko2Rating(1500, 350, 0.06);
+        const { timeControl = 'overall' } = req.query;
+
+        let rating = await Rating.findOne({ userId, timeControl });
+        if (!rating) {
+            rating = new Glicko2Rating(1500, 350, 0.06);
             return res.json({
                 userId,
-                timeControl: timeControl || 'overall',
-                rating: defaultRating.rating,
-                ratingDeviation: defaultRating.ratingDeviation,
-                volatility: defaultRating.volatility,
+                timeControl,
+                rating: rating.rating,
+                ratingDeviation: rating.ratingDeviation,
+                volatility: rating.volatility,
                 gamesPlayed: 0,
                 lastUpdated: new Date().toISOString()
             });
         }
-        
-        const rating = JSON.parse(ratingData);
         res.json(rating);
     } catch (error) {
         console.error('Get rating error:', error);
@@ -182,30 +176,21 @@ app.get('/ratings/:userId', async (req, res) => {
 // Update ratings after game
 app.post('/ratings/update', async (req, res) => {
     try {
-        const { gameId, whitePlayerId, blackPlayerId, result, timeControl } = req.body;
-        
+        const { gameId, whitePlayerId, blackPlayerId, result, timeControl = 'overall' } = req.body;
+
         if (!whitePlayerId || !blackPlayerId || result === undefined) {
             return res.status(400).json({ error: 'Player IDs and result are required' });
         }
+
+        // Get or initialize ratings from MongoDB
+        let whiteRatingDoc = await Rating.findOne({ userId: whitePlayerId, timeControl });
+        let blackRatingDoc = await Rating.findOne({ userId: blackPlayerId, timeControl });
+        const whiteBase = whiteRatingDoc || { rating: 1500, ratingDeviation: 350, volatility: 0.06, gamesPlayed: 0 };
+        const blackBase = blackRatingDoc || { rating: 1500, ratingDeviation: 350, volatility: 0.06, gamesPlayed: 0 };
         
-        // Get current ratings
-        const whiteRatingKey = `rating:${whitePlayerId}:${timeControl || 'overall'}`;
-        const blackRatingKey = `rating:${blackPlayerId}:${timeControl || 'overall'}`;
-        
-        let whiteRatingData = await redisClient.get(whiteRatingKey);
-        let blackRatingData = await redisClient.get(blackRatingKey);
-        
-        const whiteRating = whiteRatingData ? 
-            JSON.parse(whiteRatingData) : 
-            new Glicko2Rating(1500, 350, 0.06);
-        const blackRating = blackRatingData ? 
-            JSON.parse(blackRatingData) : 
-            new Glicko2Rating(1500, 350, 0.06);
-        
-        // Convert to Glicko2Rating objects
-        const whiteGlicko = new Glicko2Rating(whiteRating.rating, whiteRating.ratingDeviation, whiteRating.volatility);
-        const blackGlicko = new Glicko2Rating(blackRating.rating, blackRating.ratingDeviation, blackRating.volatility);
-        
+        const whiteGlicko = new Glicko2Rating(whiteBase.rating, whiteBase.ratingDeviation, whiteBase.volatility);
+        const blackGlicko = new Glicko2Rating(blackBase.rating, blackBase.ratingDeviation, blackBase.volatility);
+
         // Determine results (1 = win, 0.5 = draw, 0 = loss)
         let whiteResult, blackResult;
         if (result === 'white') {
@@ -218,45 +203,40 @@ app.post('/ratings/update', async (req, res) => {
             whiteResult = 0.5;
             blackResult = 0.5;
         }
-        
+
         // Update ratings
         whiteGlicko.updateRating([blackGlicko], [whiteResult]);
         blackGlicko.updateRating([whiteGlicko], [blackResult]);
-        
-        // Save updated ratings
+
+        // Save updated ratings to MongoDB (upsert)
         const updatedWhiteRating = {
             userId: whitePlayerId,
-            timeControl: timeControl || 'overall',
+            timeControl,
             rating: Math.round(whiteGlicko.rating),
             ratingDeviation: Math.round(whiteGlicko.ratingDeviation),
             volatility: whiteGlicko.volatility,
-            gamesPlayed: (whiteRating.gamesPlayed || 0) + 1,
-            lastUpdated: new Date().toISOString()
+            gamesPlayed: (whiteBase.gamesPlayed || 0) + 1,
+            lastUpdated: new Date()
         };
-        
         const updatedBlackRating = {
             userId: blackPlayerId,
-            timeControl: timeControl || 'overall',
+            timeControl,
             rating: Math.round(blackGlicko.rating),
             ratingDeviation: Math.round(blackGlicko.ratingDeviation),
             volatility: blackGlicko.volatility,
-            gamesPlayed: (blackRating.gamesPlayed || 0) + 1,
-            lastUpdated: new Date().toISOString()
+            gamesPlayed: (blackBase.gamesPlayed || 0) + 1,
+            lastUpdated: new Date()
         };
-        
-        await redisClient.set(whiteRatingKey, JSON.stringify(updatedWhiteRating));
-        await redisClient.set(blackRatingKey, JSON.stringify(updatedBlackRating));
-        
-        // Update leaderboards
-        await updateLeaderboard(whitePlayerId, updatedWhiteRating.rating, timeControl);
-        await updateLeaderboard(blackPlayerId, updatedBlackRating.rating, timeControl);
-        
+
+        await Rating.updateOne({ userId: whitePlayerId, timeControl }, updatedWhiteRating, { upsert: true });
+        await Rating.updateOne({ userId: blackPlayerId, timeControl }, updatedBlackRating, { upsert: true });
+
         res.json({
             whiteRating: updatedWhiteRating,
             blackRating: updatedBlackRating,
             ratingChanges: {
-                white: updatedWhiteRating.rating - (whiteRating.rating || 1500),
-                black: updatedBlackRating.rating - (blackRating.rating || 1500)
+                white: updatedWhiteRating.rating - (whiteBase.rating || 1500),
+                black: updatedBlackRating.rating - (blackBase.rating || 1500)
             }
         });
     } catch (error) {
@@ -270,28 +250,23 @@ app.get('/leaderboards/:timeControl', async (req, res) => {
     try {
         const { timeControl } = req.params;
         const { limit = 50 } = req.query;
-        
-        const leaderboardKey = `leaderboard:${timeControl}`;
-        const playerIds = await redisClient.zRevRange(leaderboardKey, 0, parseInt(limit) - 1, 'WITHSCORES');
-        
-        const leaderboard = [];
-        for (let i = 0; i < playerIds.length; i += 2) {
-            const userId = playerIds[i];
-            const rating = parseInt(playerIds[i + 1]);
+
+        // Get Rating docs for this timeControl sorted by rating descending
+        const ratings = await Rating.find({ timeControl })
+            .sort({ rating: -1 })
+            .limit(parseInt(limit));
             
-            const userData = await redisClient.get(`user:${userId}`);
-            if (userData) {
-                const user = JSON.parse(userData);
-                leaderboard.push({
-                    userId,
-                    username: user.username,
-                    rating,
-                    gamesPlayed: user.gamesPlayed || 0,
-                    gamesWon: user.gamesWon || 0
-                });
-            }
-        }
-        
+        // Populate username from User collection
+        const leaderboard = await Promise.all(ratings.map(async r => {
+            const user = await User.findOne({ userId: r.userId });
+            return {
+                userId: r.userId,
+                username: user ? user.username : undefined,
+                rating: r.rating,
+                gamesPlayed: r.gamesPlayed || 0
+            };
+        }));
+
         res.json(leaderboard);
     } catch (error) {
         console.error('Get leaderboard error:', error);
@@ -299,28 +274,24 @@ app.get('/leaderboards/:timeControl', async (req, res) => {
     }
 });
 
-// Get rating history
+// Get rating history (returns last N rating documents for user+timeControl)
 app.get('/ratings/:userId/history', async (req, res) => {
     try {
         const { userId } = req.params;
-        const { timeControl, limit = 100 } = req.query;
+        const { timeControl = 'overall', limit = 100 } = req.query;
         
-        const historyKey = `rating_history:${userId}:${timeControl || 'overall'}`;
-        const historyData = await redisClient.lRange(historyKey, 0, parseInt(limit) - 1);
-        
-        const history = historyData.map(entry => JSON.parse(entry));
-        res.json(history);
+        // In the rewritten version, just return the latest N ratings for user & time control
+        // (if you keep a separate history collection, change this logic)
+        const ratings = await Rating.find({ userId, timeControl })
+            .sort({ lastUpdated: -1 })
+            .limit(parseInt(limit));
+        res.json(ratings);
     } catch (error) {
         console.error('Get rating history error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
-// Update leaderboard
-async function updateLeaderboard(userId, rating, timeControl) {
-    const leaderboardKey = `leaderboard:${timeControl || 'overall'}`;
-    await redisClient.zAdd(leaderboardKey, { score: rating, value: userId });
-}
 
 // Health check
 app.get('/health', (req, res) => {
