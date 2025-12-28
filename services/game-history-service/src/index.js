@@ -1,27 +1,23 @@
 require('dotenv').config();
 const express = require('express');
-const { createClient } = require('redis');
+const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { Chess } = require('chess.js');
+const mongoose = require('mongoose');
+const GameHistory = require('./models/GameHistory');
 
 const app = express();
+app.use(cors());
 app.use(express.json());
-const PORT = process.env.PORT || 3013;
+const PORT = process.env.PORT || 3005;
 
-// Redis client
-const redisClient = createClient({ url: process.env.REDIS_URL });
-redisClient.on('error', (err) => console.log('Redis Client Error', err));
-
-// Connect to Redis
-(async () => {
-    try {
-        await redisClient.connect();
-        console.log('Connected to Redis for game history service');
-    } catch (err) {
-        console.error('Failed to connect to Redis:', err);
-        process.exit(1);
-    }
-})();
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URL || 'mongodb://mongodb:27017/chess-history').then(() => {
+    console.log('Connected to MongoDB for game history service');
+}).catch((err) => {
+    console.error('Failed to connect to MongoDB:', err);
+    process.exit(1);
+});
 
 // Save completed game
 app.post('/games/save', async (req, res) => {
@@ -48,7 +44,7 @@ app.post('/games/save', async (req, res) => {
             return res.status(400).json({ error: 'Game ID, player IDs, and result are required' });
         }
         
-        const gameHistory = {
+        const gameHistory = new GameHistory({
             gameId,
             whitePlayerId,
             blackPlayerId,
@@ -56,28 +52,17 @@ app.post('/games/save', async (req, res) => {
             blackUsername: blackUsername || 'Unknown',
             whiteRating: whiteRating || 1200,
             blackRating: blackRating || 1200,
-            result, // 'white', 'black', 'draw'
-            termination, // 'checkmate', 'stalemate', 'timeout', 'resignation', etc.
+            result,
+            termination,
             timeControl,
             pgn: pgn || '',
             moves: moves || [],
             gameDuration: gameDuration || 0,
-            startedAt: startedAt || new Date().toISOString(),
-            endedAt: endedAt || new Date().toISOString(),
-            createdAt: new Date().toISOString()
-        };
-        
-        // Save game history
-        await redisClient.set(`game_history:${gameId}`, JSON.stringify(gameHistory));
-        
-        // Add to player histories
-        await addToPlayerHistory(whitePlayerId, gameHistory, 'white');
-        await addToPlayerHistory(blackPlayerId, gameHistory, 'black');
-        
-        // Add to recent games list
-        await redisClient.lPush('recent_games', gameId);
-        await redisClient.lTrim('recent_games', 0, 999); // Keep last 1000 games
-        
+            startedAt: startedAt ? new Date(startedAt) : new Date(),
+            endedAt: endedAt ? new Date(endedAt) : new Date(),
+            createdAt: new Date()
+        });
+        await gameHistory.save();
         res.json({ message: 'Game saved successfully', gameId });
     } catch (error) {
         console.error('Save game error:', error);
@@ -98,30 +83,26 @@ app.get('/users/:userId/games', async (req, res) => {
             startDate,
             endDate
         } = req.query;
-        
-        const historyKey = `user_games:${userId}`;
-        const gameIds = await redisClient.lRange(historyKey, parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
-        
-        const games = [];
-        for (const gameId of gameIds) {
-            const gameData = await redisClient.get(`game_history:${gameId}`);
-            if (gameData) {
-                const game = JSON.parse(gameData);
-                
-                // Apply filters
-                if (timeControl && game.timeControl !== timeControl) continue;
-                if (result && game.result !== result) continue;
-                if (opponent) {
-                    const isOpponent = game.whitePlayerId === opponent || game.blackPlayerId === opponent;
-                    if (!isOpponent) continue;
-                }
-                if (startDate && new Date(game.startedAt) < new Date(startDate)) continue;
-                if (endDate && new Date(game.startedAt) > new Date(endDate)) continue;
-                
-                games.push(game);
-            }
-        }
-        
+
+        const query = {
+            $or: [
+                { whitePlayerId: userId },
+                { blackPlayerId: userId }
+            ]
+        };
+        if (timeControl) query.timeControl = timeControl;
+        if (result) query.result = result;
+        if (opponent) query.$or = [
+            { whitePlayerId: userId, blackPlayerId: opponent },
+            { blackPlayerId: userId, whitePlayerId: opponent }
+        ];
+        if (startDate) query.startedAt = { ...query.startedAt, $gte: new Date(startDate) };
+        if (endDate) query.startedAt = { ...query.startedAt, $lte: new Date(endDate) };
+
+        const games = await GameHistory.find(query)
+            .sort({ startedAt: -1 })
+            .skip(Number(offset))
+            .limit(Number(limit));
         res.json(games);
     } catch (error) {
         console.error('Get user games error:', error);
@@ -133,13 +114,10 @@ app.get('/users/:userId/games', async (req, res) => {
 app.get('/games/:gameId', async (req, res) => {
     try {
         const { gameId } = req.params;
-        
-        const gameData = await redisClient.get(`game_history:${gameId}`);
-        if (!gameData) {
+        const game = await GameHistory.findOne({ gameId });
+        if (!game) {
             return res.status(404).json({ error: 'Game not found' });
         }
-        
-        const game = JSON.parse(gameData);
         res.json(game);
     } catch (error) {
         console.error('Get game error:', error);
@@ -152,10 +130,16 @@ app.get('/users/:userId/stats', async (req, res) => {
     try {
         const { userId } = req.params;
         const { timeControl } = req.query;
-        
-        const historyKey = `user_games:${userId}`;
-        const gameIds = await redisClient.lRange(historyKey, 0, -1);
-        
+
+        const query = {
+            $or: [
+                { whitePlayerId: userId },
+                { blackPlayerId: userId }
+            ]
+        };
+        if (timeControl) query.timeControl = timeControl;
+        const games = await GameHistory.find(query);
+
         const stats = {
             totalGames: 0,
             wins: 0,
@@ -171,151 +155,110 @@ app.get('/users/:userId/stats', async (req, res) => {
             openingStats: {},
             endgameStats: {}
         };
-        
         let totalDuration = 0;
         const monthlyGames = {};
         const opponentGames = {};
         const openingGames = {};
         const endgameGames = {};
-        
-        for (const gameId of gameIds) {
-            const gameData = await redisClient.get(`game_history:${gameId}`);
-            if (gameData) {
-                const game = JSON.parse(gameData);
-                
-                // Filter by time control if specified
-                if (timeControl && game.timeControl !== timeControl) continue;
-                
-                stats.totalGames++;
-                totalDuration += game.gameDuration || 0;
-                
-                // Update win/loss/draw stats
+        for (const game of games) {
+            stats.totalGames++;
+            totalDuration += game.gameDuration || 0;
+            if (game.result === 'white' && game.whitePlayerId === userId) {
+                stats.wins++;
+            } else if (game.result === 'black' && game.blackPlayerId === userId) {
+                stats.wins++;
+            } else if (game.result === 'draw') {
+                stats.draws++;
+            } else {
+                stats.losses++;
+            }
+            if (game.gameDuration) {
+                stats.longestGame = Math.max(stats.longestGame, game.gameDuration);
+                stats.shortestGame = Math.min(stats.shortestGame, game.gameDuration);
+            }
+            if (!stats.timeControlStats[game.timeControl]) {
+                stats.timeControlStats[game.timeControl] = { games: 0, wins: 0, losses: 0, draws: 0 };
+            }
+            stats.timeControlStats[game.timeControl].games++;
+            if (game.result === 'white' && game.whitePlayerId === userId) {
+                stats.timeControlStats[game.timeControl].wins++;
+            } else if (game.result === 'black' && game.blackPlayerId === userId) {
+                stats.timeControlStats[game.timeControl].wins++;
+            } else if (game.result === 'draw') {
+                stats.timeControlStats[game.timeControl].draws++;
+            } else {
+                stats.timeControlStats[game.timeControl].losses++;
+            }
+            const month = (game.startedAt instanceof Date ? game.startedAt : new Date(game.startedAt)).toISOString().substring(0, 7);
+            if (!monthlyGames[month]) {
+                monthlyGames[month] = { games: 0, wins: 0, losses: 0, draws: 0 };
+            }
+            monthlyGames[month].games++;
+            if (game.result === 'white' && game.whitePlayerId === userId) {
+                monthlyGames[month].wins++;
+            } else if (game.result === 'black' && game.blackPlayerId === userId) {
+                monthlyGames[month].wins++;
+            } else if (game.result === 'draw') {
+                monthlyGames[month].draws++;
+            } else {
+                monthlyGames[month].losses++;
+            }
+            const opponentId = game.whitePlayerId === userId ? game.blackPlayerId : game.whitePlayerId;
+            const opponentName = game.whitePlayerId === userId ? game.blackUsername : game.whiteUsername;
+            if (!opponentGames[opponentId]) {
+                opponentGames[opponentId] = { name: opponentName, games: 0, wins: 0, losses: 0, draws: 0 };
+            }
+            opponentGames[opponentId].games++;
+            if (game.result === 'white' && game.whitePlayerId === userId) {
+                opponentGames[opponentId].wins++;
+            } else if (game.result === 'black' && game.blackPlayerId === userId) {
+                opponentGames[opponentId].wins++;
+            } else if (game.result === 'draw') {
+                opponentGames[opponentId].draws++;
+            } else {
+                opponentGames[opponentId].losses++;
+            }
+            if (game.moves && game.moves.length > 0) {
+                const openingMoves = game.moves.slice(0, Math.min(10, game.moves.length));
+                const openingKey = openingMoves.join(' ');
+                if (!openingGames[openingKey]) {
+                    openingGames[openingKey] = { games: 0, wins: 0, losses: 0, draws: 0 };
+                }
+                openingGames[openingKey].games++;
                 if (game.result === 'white' && game.whitePlayerId === userId) {
-                    stats.wins++;
+                    openingGames[openingKey].wins++;
                 } else if (game.result === 'black' && game.blackPlayerId === userId) {
-                    stats.wins++;
+                    openingGames[openingKey].wins++;
                 } else if (game.result === 'draw') {
-                    stats.draws++;
+                    openingGames[openingKey].draws++;
                 } else {
-                    stats.losses++;
+                    openingGames[openingKey].losses++;
                 }
-                
-                // Update game duration stats
-                if (game.gameDuration) {
-                    stats.longestGame = Math.max(stats.longestGame, game.gameDuration);
-                    stats.shortestGame = Math.min(stats.shortestGame, game.gameDuration);
+            }
+            if (game.moves && game.moves.length > 10) {
+                const endgameMoves = game.moves.slice(-10);
+                const endgameKey = endgameMoves.join(' ');
+                if (!endgameGames[endgameKey]) {
+                    endgameGames[endgameKey] = { games: 0, wins: 0, losses: 0, draws: 0 };
                 }
-                
-                // Update time control stats
-                if (!stats.timeControlStats[game.timeControl]) {
-                    stats.timeControlStats[game.timeControl] = { games: 0, wins: 0, losses: 0, draws: 0 };
-                }
-                stats.timeControlStats[game.timeControl].games++;
-                
+                endgameGames[endgameKey].games++;
                 if (game.result === 'white' && game.whitePlayerId === userId) {
-                    stats.timeControlStats[game.timeControl].wins++;
+                    endgameGames[endgameKey].wins++;
                 } else if (game.result === 'black' && game.blackPlayerId === userId) {
-                    stats.timeControlStats[game.timeControl].wins++;
+                    endgameGames[endgameKey].wins++;
                 } else if (game.result === 'draw') {
-                    stats.timeControlStats[game.timeControl].draws++;
+                    endgameGames[endgameKey].draws++;
                 } else {
-                    stats.timeControlStats[game.timeControl].losses++;
-                }
-                
-                // Update monthly stats
-                const month = game.startedAt.substring(0, 7); // YYYY-MM
-                if (!monthlyGames[month]) {
-                    monthlyGames[month] = { games: 0, wins: 0, losses: 0, draws: 0 };
-                }
-                monthlyGames[month].games++;
-                
-                if (game.result === 'white' && game.whitePlayerId === userId) {
-                    monthlyGames[month].wins++;
-                } else if (game.result === 'black' && game.blackPlayerId === userId) {
-                    monthlyGames[month].wins++;
-                } else if (game.result === 'draw') {
-                    monthlyGames[month].draws++;
-                } else {
-                    monthlyGames[month].losses++;
-                }
-                
-                // Update opponent stats
-                const opponentId = game.whitePlayerId === userId ? game.blackPlayerId : game.whitePlayerId;
-                const opponentName = game.whitePlayerId === userId ? game.blackUsername : game.whiteUsername;
-                
-                if (!opponentGames[opponentId]) {
-                    opponentGames[opponentId] = { 
-                        name: opponentName, 
-                        games: 0, 
-                        wins: 0, 
-                        losses: 0, 
-                        draws: 0 
-                    };
-                }
-                opponentGames[opponentId].games++;
-                
-                if (game.result === 'white' && game.whitePlayerId === userId) {
-                    opponentGames[opponentId].wins++;
-                } else if (game.result === 'black' && game.blackPlayerId === userId) {
-                    opponentGames[opponentId].wins++;
-                } else if (game.result === 'draw') {
-                    opponentGames[opponentId].draws++;
-                } else {
-                    opponentGames[opponentId].losses++;
-                }
-                
-                // Analyze opening (first 10 moves)
-                if (game.moves && game.moves.length > 0) {
-                    const openingMoves = game.moves.slice(0, Math.min(10, game.moves.length));
-                    const openingKey = openingMoves.join(' ');
-                    
-                    if (!openingGames[openingKey]) {
-                        openingGames[openingKey] = { games: 0, wins: 0, losses: 0, draws: 0 };
-                    }
-                    openingGames[openingKey].games++;
-                    
-                    if (game.result === 'white' && game.whitePlayerId === userId) {
-                        openingGames[openingKey].wins++;
-                    } else if (game.result === 'black' && game.blackPlayerId === userId) {
-                        openingGames[openingKey].wins++;
-                    } else if (game.result === 'draw') {
-                        openingGames[openingKey].draws++;
-                    } else {
-                        openingGames[openingKey].losses++;
-                    }
-                }
-                
-                // Analyze endgame (last 10 moves)
-                if (game.moves && game.moves.length > 10) {
-                    const endgameMoves = game.moves.slice(-10);
-                    const endgameKey = endgameMoves.join(' ');
-                    
-                    if (!endgameGames[endgameKey]) {
-                        endgameGames[endgameKey] = { games: 0, wins: 0, losses: 0, draws: 0 };
-                    }
-                    endgameGames[endgameKey].games++;
-                    
-                    if (game.result === 'white' && game.whitePlayerId === userId) {
-                        endgameGames[endgameKey].wins++;
-                    } else if (game.result === 'black' && game.blackPlayerId === userId) {
-                        endgameGames[endgameKey].wins++;
-                    } else if (game.result === 'draw') {
-                        endgameGames[endgameKey].draws++;
-                    } else {
-                        endgameGames[endgameKey].losses++;
-                    }
+                    endgameGames[endgameKey].losses++;
                 }
             }
         }
-        
-        // Calculate final stats
         stats.winRate = stats.totalGames > 0 ? (stats.wins / stats.totalGames) * 100 : 0;
         stats.averageGameDuration = stats.totalGames > 0 ? totalDuration / stats.totalGames : 0;
         stats.monthlyStats = monthlyGames;
         stats.opponentStats = opponentGames;
         stats.openingStats = openingGames;
         stats.endgameStats = endgameGames;
-        
         res.json(stats);
     } catch (error) {
         console.error('Get user stats error:', error);
@@ -327,18 +270,9 @@ app.get('/users/:userId/stats', async (req, res) => {
 app.get('/games/recent', async (req, res) => {
     try {
         const { limit = 20 } = req.query;
-        
-        const gameIds = await redisClient.lRange('recent_games', 0, parseInt(limit) - 1);
-        const games = [];
-        
-        for (const gameId of gameIds) {
-            const gameData = await redisClient.get(`game_history:${gameId}`);
-            if (gameData) {
-                const game = JSON.parse(gameData);
-                games.push(game);
-            }
-        }
-        
+        const games = await GameHistory.find({})
+            .sort({ startedAt: -1 })
+            .limit(Number(limit));
         res.json(games);
     } catch (error) {
         console.error('Get recent games error:', error);
@@ -346,12 +280,8 @@ app.get('/games/recent', async (req, res) => {
     }
 });
 
-// Add game to player history
-async function addToPlayerHistory(playerId, gameHistory, playerColor) {
-    const historyKey = `user_games:${playerId}`;
-    await redisClient.lPush(historyKey, gameHistory.gameId);
-    await redisClient.lTrim(historyKey, 0, 9999); // Keep last 10,000 games per player
-}
+// Removed: No longer needed, handled via query filters on MongoDB.
+
 
 // Health check
 app.get('/health', (req, res) => {

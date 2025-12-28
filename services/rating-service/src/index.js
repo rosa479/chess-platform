@@ -7,13 +7,13 @@ const Rating = require('./models/Rating');
 const User = require('./models/User');
 
 const app = express();
-app.use(cors({ origin: 'http://localhost:8080' }));
+// app.use(cors({ origin: 'http://localhost:8080' }));
 app.use(express.json());
 // Rating service port (per currWorking.md it runs on 3002)
 const PORT = process.env.PORT || 3002;
 
 // MongoDB connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/chess-rating')
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://mongodb:27017/chess-rating')
     .then(() => {
         console.log('Connected to MongoDB for rating service');
     })

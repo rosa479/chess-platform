@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
@@ -10,7 +10,7 @@ const app = express();
 app.use(express.json());
 // Basic CORS to allow the frontend (default Vite at 8080) to call this service
 app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || 'http://localhost:8080');
+    res.header('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:5173');
     res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization');
     if (req.method === 'OPTIONS') {
@@ -19,12 +19,12 @@ app.use((req, res, next) => {
     next();
 });
 
-const PORT = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
+const PORT = process.env.PORT;
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN;
 
 // MongoDB connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/chess-users')
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://mongodb:27017/chess-user')
     .then(() => {
         console.log('Connected to MongoDB for user service');
     }).catch((error) => {

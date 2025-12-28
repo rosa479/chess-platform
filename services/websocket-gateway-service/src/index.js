@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
 const url = require('url');
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT;
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // Initialize Redis clients
@@ -22,28 +22,63 @@ const wss = new WebSocketServer({ port: PORT });
 
 wss.on('connection', async (ws, req) => {
     const connectionId = uuidv4();
-    const { token, gameId } = url.parse(req.url, true).query;
+    let token, gameId;
+// 1. Support for WebSocket handshake with Socket.IO style as well as header/bearer
+if (req.headers['authorization']) {
+  token = req.headers['authorization'];
+  if (token.startsWith('Bearer ')) token = token.slice(7);
+  const query = url.parse(req.url, true).query;
+  gameId = query.gameId;
+} else {
+  const query = url.parse(req.url, true).query;
+  token = query.token;
+  gameId = query.gameId;
+}
 
     // 1. --- Authentication ---
-    if (!token ||!gameId) {
-        console.log('Connection rejected: Missing token or gameId.');
-        ws.close(1008, 'Token and gameId are required.');
+    if (!token) {
+        ws.close(1008, 'Token required.');
         return;
     }
-
     let decodedToken;
     try {
         decodedToken = jwt.verify(token, JWT_SECRET);
-    } catch (err) {
-        console.log('Connection rejected: Invalid token.');
+        ws.userId = decodedToken.userId;
+    } catch {
         ws.close(1008, 'Invalid token.');
         return;
     }
 
-    console.log(`Client ${decodedToken.userId} connected with ID ${connectionId} for game ${gameId}`);
+    // Strict IN_GAME check in Redis
+    let foundGameId = null;
+    try {
+        const Redis = require('ioredis');
+const redisClient = new Redis({ host: 'redis', port: 6379, family: 4 });
+        await redisClient.connect();
+        const state = await redisClient.get(`player:state:${decodedToken.userId}`);
+        if (state !== 'IN_GAME') {
+            await redisClient.disconnect();
+            ws.close(1008, 'Not in game.');
+            return;
+        }
+        foundGameId = await redisClient.get(`player:game:${decodedToken.userId}`);
+        await redisClient.disconnect();
+    } catch {}
+    if (!foundGameId) {
+        ws.close(1008, 'Not in game.');
+        return;
+    }
+    if (!gameId || foundGameId !== gameId) {
+        ws.close(1008, 'Game ID mismatch or not provided.');
+        return;
+    }
+    clients.set(connectionId, { ws, userId: decodedToken.userId, gameId });
+    ws.room = `game:${gameId}`;
 
     // Store connection details for this instance
     clients.set(connectionId, { ws, userId: decodedToken.userId, gameId });
+    // Join user to room by gameId for easy broadcasting
+    ws.room = `game:${gameId}`;
 
     // 2. --- Redis Subscription ---
     // If this is the first client for this game on this server instance, subscribe to the game's channel
@@ -70,6 +105,15 @@ wss.on('connection', async (ws, req) => {
     ws.on('pong', () => {
         ws.isAlive = true;
     });
+
+    // Send initial game state immediately after join (for instant board render)
+    try {
+      // Assume async getInitialGameState is available or you can get from Redis/DB
+      const gameState = {} // ...fetch game initial state here (stubbed)
+      ws.send(JSON.stringify({ type: 'game-state', ...gameState }));
+    } catch (err) {
+      console.error('Failed to send initial game state', err);
+    }
 
     // 4. --- Message Handling from Client ---
     ws.on('message', (rawMessage) => {

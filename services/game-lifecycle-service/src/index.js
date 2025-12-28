@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const { createClient } = require('redis');
+const Redis = require('ioredis');
 const { Chess } = require('chess.js');
 const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
@@ -32,18 +32,17 @@ app.get('/health', (req, res) => {
 });
 
 // Server configuration
-const PORT = process.env.PORT || 3003;
+const PORT = process.env.PORT;
 
 // Redis configuration from environment
-const REDIS_HOST = process.env.REDIS_HOST || '127.0.0.1';
-const REDIS_PORT = process.env.REDIS_PORT || 6379;
-const REDIS_URL = process.env.REDIS_URL || `redis://${REDIS_HOST}:${REDIS_PORT}`;
-
 // 1. Connect to Redis
-const redisClient = createClient({
-    url: REDIS_URL,
+const redisClient = new Redis({
+  host: 'redis',
+  port: 6379,
+  family: 4
 });
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
+redisClient.on('connect', () => console.log('✅ Connected to Redis (game-lifecycle-service)'));
 
 // 2. Mock Message Bus (RabbitMQ, Kafka, etc.)
 const messageBus = {
@@ -55,24 +54,27 @@ const messageBus = {
 
 app.post('/games', async (req, res) => {
     try {
-        console.log('📥 POST /games - Request body:', JSON.stringify(req.body, null, 2));
-        
         const { whitePlayerId, blackPlayerId, timeControl } = req.body;
-        
-        // Validate required fields
         if (!whitePlayerId || !blackPlayerId) {
-            console.error('❌ Missing required fields: whitePlayerId or blackPlayerId');
             return res.status(400).json({ error: 'whitePlayerId and blackPlayerId are required' });
         }
-        
         if (!timeControl || typeof timeControl.initialMs !== 'number') {
-            console.error('❌ Invalid timeControl:', timeControl);
             return res.status(400).json({ error: 'timeControl with initialMs is required' });
         }
-        
+        // Prevent more than one active game per user
+        const gameKeys = await redisClient.keys('game:*');
+        for (const gameKey of gameKeys) {
+            const stateRaw = await redisClient.get(gameKey);
+            if (stateRaw) {
+                const state = JSON.parse(stateRaw);
+                if (state.whitePlayerId === whitePlayerId || state.blackPlayerId === whitePlayerId ||
+                    state.whitePlayerId === blackPlayerId || state.blackPlayerId === blackPlayerId) {
+                    return res.status(409).json({ error: 'User already in a game' });
+                }
+            }
+        }
         const gameId = uuidv4();
         const chess = new Chess();
-
         const gameState = {
             gameId,
             whitePlayerId,
@@ -82,12 +84,9 @@ app.post('/games', async (req, res) => {
             blackTimeLeftMs: timeControl.initialMs,
             lastMoveTimestamp: Date.now(),
         };
-
         await redisClient.set(`game:${gameId}`, JSON.stringify(gameState));
-        console.log(`✅ Game created: ${gameId} for ${whitePlayerId} vs ${blackPlayerId}`);
         res.status(201).json({ gameId, initialState: gameState });
     } catch (error) {
-        console.error('❌ Error creating game:', error);
         res.status(500).json({ error: 'Failed to create game.', details: error.message });
     }
 });
@@ -189,7 +188,7 @@ async function handleGameOver(gameState, chess, reason, winner) {
     messageBus.publish('game.finished', eventPayload);
 
     // --- Update user stats ---
-    const userServiceBase = process.env.USER_SERVICE_URL || 'http://localhost:3001';
+    const userServiceBase = process.env.USER_SERVICE_URL;
     const gameResultPath = (userId) => `${userServiceBase}/users/${userId}/game-result`;
     // Prepare results
     let whiteResult = 'loss';
@@ -249,8 +248,6 @@ app.use((req, res) => {
 
 async function startServer() {
     try {
-        await redisClient.connect();
-        console.log('✅ Connected to Redis (game-lifecycle-service)');
     } catch (error) {
         console.error('❌ Failed to connect to Redis:', error);
         process.exit(1);

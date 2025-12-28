@@ -69,14 +69,4 @@ export async function getActiveGame(userId: string): Promise<{ gameId: string } 
   }
 }
 
-export async function clearActiveGame(userId: string) {
-  const res = await fetch(`${MATCHMAKING_SERVICE_URL}/matchmaking/clear-active-game`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Failed to clear active game');
-  return data;
-}
 

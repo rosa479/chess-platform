@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { createClient } = require('redis');
+const Redis = require('ioredis');
 const { v4: uuidv4 } = require('uuid');
 const { Chess } = require('chess.js');
 
@@ -9,7 +9,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3007;
 
 // Redis client
-const redisClient = createClient({ url: process.env.REDIS_URL });
+const redisClient = new Redis({ host: 'redis', port: 6379, family: 4 });
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
 
 // Connect to Redis

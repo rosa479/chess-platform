@@ -1,332 +1,77 @@
-version: '3.8'
-
 services:
+  mongodb:
+    image: mongo:6
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
   redis:
-    image: redis:alpine
+    image: redis:7
+    container_name: redis
     ports:
       - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   user-service:
-    build: 
-      context: ./services/user-service
-      dockerfile: Dockerfile
+    build: ./services/user-service
+    env_file:
+      - ./services/user-service/.env
+    depends_on:
+      - mongodb
+      - redis
     ports:
       - "3001:3001"
-    environment:
-      - NODE_ENV=development
-      - PORT=3001
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-      - JWT_EXPIRES_IN=24h
-      - BCRYPT_ROUNDS=10
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  game-lifecycle-service:
-    build:
-      context: ./services/game-lifecycle-service
-      dockerfile: Dockerfile
-    ports:
-      - "3003:3003"
-    environment:
-      - NODE_ENV=development
-      - PORT=3003
-      - REDIS_URL=redis://redis:6379
-      - MAX_MOVE_TIME=300000
-      - DEFAULT_TIME_CONTROL=blitz
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  matchmaking-service:
-    build:
-      context: ./services/matchmaking-service
-      dockerfile: Dockerfile
-    ports:
-      - "3004:3004"
-    environment:
-      - NODE_ENV=development
-      - PORT=3004
-      - REDIS_URL=redis://redis:6379
-      - RATING_TOLERANCE=200
-      - MAX_WAIT_TIME=30000
-      - GAME_SERVICE_URL=http://game-lifecycle-service:3003
-      - USER_SERVICE_URL=http://user-service:3001
-    depends_on:
-      redis:
-        condition: service_healthy
-      user-service:
-        condition: service_healthy
-      game-lifecycle-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  ai-analysis-service:
-    build:
-      context: ./services/ai-analysis-service
-      dockerfile: Dockerfile
-    ports:
-      - "3004:3004"
-    environment:
-      - NODE_ENV=development
-      - PORT=3004
-      - REDIS_URL=redis://redis:6379
-      - DEFAULT_DEPTH=3
-      - MAX_DEPTH=7
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  websocket-gateway-service:
-    build:
-      context: ./services/websocket-gateway-service
-      dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
-    environment:
-      - NODE_ENV=development
-      - PORT=8080
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
-      - HEARTBEAT_INTERVAL=30000
-      - CONNECTION_TIMEOUT=60000
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  tournament-service:
-    build:
-      context: ./services/tournament-service
-      dockerfile: Dockerfile
-    ports:
-      - "3005:3005"
-    environment:
-      - NODE_ENV=development
-      - PORT=3005
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  computer-opponent-service:
-    build:
-      context: ./services/computer-opponent-service
-      dockerfile: Dockerfile
-    ports:
-      - "3006:3006"
-    environment:
-      - NODE_ENV=development
-      - PORT=3006
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3006/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  puzzle-service:
-    build:
-      context: ./services/puzzle-service
-      dockerfile: Dockerfile
-    ports:
-      - "3007:3007"
-    environment:
-      - NODE_ENV=development
-      - PORT=3007
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  learning-service:
-    build:
-      context: ./services/learning-service
-      dockerfile: Dockerfile
-    ports:
-      - "3008:3008"
-    environment:
-      - NODE_ENV=development
-      - PORT=3008
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3008/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  spectate-service:
-    build:
-      context: ./services/spectate-service
-      dockerfile: Dockerfile
-    ports:
-      - "3009:3009"
-    environment:
-      - NODE_ENV=development
-      - PORT=3009
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3009/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  community-service:
-    build:
-      context: ./services/community-service
-      dockerfile: Dockerfile
-    ports:
-      - "3010:3010"
-    environment:
-      - NODE_ENV=development
-      - PORT=3010
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  analysis-tools-service:
-    build:
-      context: ./services/analysis-tools-service
-      dockerfile: Dockerfile
-    ports:
-      - "3011:3011"
-    environment:
-      - NODE_ENV=development
-      - PORT=3011
-      - REDIS_URL=redis://redis:6379
-      - STOCKFISH_PATH=stockfish
-      - STOCKFISH_DEPTH=15
-      - STOCKFISH_THREADS=4
-      - STOCKFISH_HASH=256
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3011/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   rating-service:
-    build:
-      context: ./services/rating-service
-      dockerfile: Dockerfile
-    ports:
-      - "3012:3012"
-    environment:
-      - NODE_ENV=development
-      - PORT=3012
-      - REDIS_URL=redis://redis:6379
+    build: ./services/rating-service
+    env_file:
+      - ./services/rating-service/.env
     depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3012/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - mongodb
+    ports:
+      - "3002:3002"
+
+  game-lifecycle-service:
+    build: ./services/game-lifecycle-service
+    env_file:
+      - ./services/game-lifecycle-service/.env
+    depends_on:
+      - redis
+    ports:
+      - "3003:3003"
+
+  matchmaking-service:
+    build: ./services/matchmaking-service
+    env_file:
+      - ./services/matchmaking-service/.env
+    depends_on:
+      - redis
+    ports:
+      - "3004:3004"
 
   game-history-service:
-    build:
-      context: ./services/game-history-service
-      dockerfile: Dockerfile
-    ports:
-      - "3013:3013"
-    environment:
-      - NODE_ENV=development
-      - PORT=3013
-      - REDIS_URL=redis://redis:6379
+    build: ./services/game-history-service
+    env_file:
+      - ./services/game-history-service/.env
     depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3013/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - mongodb
+    ports:
+      - "3005:3005"
 
-  client:
-    build:
-      context: ./client
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      - REACT_APP_API_URL=http://localhost:3001
-      - REACT_APP_WS_URL=ws://localhost:8080
-      - CHOKIDAR_USEPOLLING=true
+  websocket-gateway-service:
+    build: ./services/websocket-gateway-service
+    env_file:
+      - ./services/websocket-gateway-service/.env
     depends_on:
-      user-service:
-        condition: service_healthy
-      websocket-gateway-service:
-        condition: service_healthy
-    volumes:
-      - ./client/src:/app/src
-      - ./client/public:/app/public
-    stdin_open: true
-    tty: true
+      - redis
+    ports:
+      - "3006:3006"
+
+  frontend:
+    build: ./client
+    ports:
+      - "5173:80"
 
 volumes:
-  redis_data:
-    driver: local
-
-networks:
-  default:
-    name: chess-platform-network
+  mongo-data:

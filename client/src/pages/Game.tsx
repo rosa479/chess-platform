@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+// --- WebSocket setup ---
+// (no package needed, use browser WebSocket)
+
 import { useParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChessBoard } from '@/components/chess/ChessBoard';
@@ -20,6 +23,8 @@ const boardColorMap = {
 };
 
 const Game = () => {
+  // --- WebSocket state and ref ---
+  const wsRef = useRef<WebSocket | null>(null);
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
   const { user, isAuthenticated } = useAuth();
@@ -84,6 +89,54 @@ const Game = () => {
 
   // Fetch game state
   useEffect(() => {
+    // --- WebSocket: connect on mount ---
+    if (gameId && isAuthenticated && user?.userId && !gameOver) {
+      // Get token from localStorage (same as used for API auth)
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsBase = (import.meta.env.VITE_WS_URL || wsProtocol + '://localhost:3006');
+        const wsUrl = `${wsBase}?token=${encodeURIComponent(token)}&gameId=${encodeURIComponent(gameId)}`;
+        // Ensure no double connect
+if (!wsRef.current || wsRef.current.readyState > 1) {
+  wsRef.current = new WebSocket(wsUrl);
+  wsRef.current.onopen = () => {
+    // tell server we're joining this game (if required by backend)
+    wsRef.current?.send(JSON.stringify({ type: 'join-game', payload: { gameId }}));
+  };
+}
+        wsRef.current.onopen = () => {
+          // Optionally notify connected
+        };
+        wsRef.current.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            // Look for game over event (standardize if needed)
+            if (msg.outcome && (msg.type === 'game.finished' || msg.type === 'game-over' || msg.gameOver === true)) {
+              setGameOver(msg.outcome);
+            }
+            // Optionally: force fetch game state on any update
+            if (msg.fen) {
+              setGameState((prev) => ({ ...prev, fen: msg.fen }));
+            }
+          } catch {}
+        };
+        wsRef.current.onerror = (e) => {
+          // Ignore, fallback to polling
+        };
+        wsRef.current.onclose = () => {
+          wsRef.current = null;
+        };
+      }
+    }
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+
     if (!gameId || !isAuthenticated || gameNotFound) return;
     
     // Reset initial load flag when gameId changes
