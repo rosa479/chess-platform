@@ -61,8 +61,13 @@ const Game = () => {
     }
   }, [isAuthenticated, navigate]);
 
-  // Track if this is the initial load
   const isInitialLoadRef = useRef(true);
+  // Reset initial-load flag ONLY when gameId changes
+  useEffect(() => {
+    isInitialLoadRef.current = true;
+  }, [gameId]);
+
+  // Track if this is the initial load
 
   // Infer a timeout result when the server has already deleted the game (404)
   const inferTimeoutOutcome = () => {
@@ -97,54 +102,50 @@ const Game = () => {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const wsBase = (import.meta.env.VITE_WS_URL || wsProtocol + '://localhost:3006');
         const wsUrl = `${wsBase}?token=${encodeURIComponent(token)}&gameId=${encodeURIComponent(gameId)}`;
-        // Ensure no double connect
-if (!wsRef.current || wsRef.current.readyState > 1) {
-  wsRef.current = new WebSocket(wsUrl);
-  wsRef.current.onopen = () => {
-    // tell server we're joining this game (if required by backend)
-    wsRef.current?.send(JSON.stringify({ type: 'join-game', payload: { gameId }}));
-  };
-}
-        wsRef.current.onopen = () => {
-          // Optionally notify connected
-        };
-        wsRef.current.onmessage = (event) => {
-          try {
-            const msg = JSON.parse(event.data);
-            // Look for game over event (standardize if needed)
-            if (msg.outcome && (msg.type === 'game.finished' || msg.type === 'game-over' || msg.gameOver === true)) {
-              setGameOver(msg.outcome);
-            }
-            // Optionally: force fetch game state on any update
-            if (msg.fen) {
-              setGameState((prev) => ({ ...prev, fen: msg.fen }));
-            }
-          } catch {}
-        };
-        wsRef.current.onerror = (e) => {
-          // Ignore, fallback to polling
-        };
-        wsRef.current.onclose = () => {
-          wsRef.current = null;
-        };
+        // --- WebSocket: connect on mount --- (fixed)
+        if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED) {
+          wsRef.current = new WebSocket(wsUrl);
+
+          wsRef.current.onopen = () => {
+            wsRef.current?.send(
+              JSON.stringify({
+                type: 'join-game',
+                payload: { gameId },
+              })
+            );
+          };
+
+          wsRef.current.onmessage = (event) => {
+            try {
+              const msg = JSON.parse(event.data);
+              if (msg.outcome && (msg.type === 'game.finished' || msg.type === 'game-over' || msg.gameOver === true)) {
+                setGameOver(msg.outcome);
+              }
+              if (msg.fen) {
+                setGameState((prev) => (prev ? { ...prev, fen: msg.fen } : prev));
+              }
+            } catch {}
+          };
+
+          wsRef.current.onerror = () => {};
+          wsRef.current.onclose = () => {
+            wsRef.current = null;
+          };
+        }
       }
     }
 
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-    };
 
-    if (!gameId || !isAuthenticated || gameNotFound) return;
-    
+    // Always attempt to load, even if missing params, to prevent loader hang
+    if (!gameId || !isAuthenticated || gameNotFound) {
+      setLoading(false);
+    }
+
     // Reset initial load flag when gameId changes
-    isInitialLoadRef.current = true;
     setGameNotFound(false);
 
     const fetchGameState = async () => {
-      // Don't poll if game is over or not found
+      if (!gameId || !isAuthenticated || gameNotFound) return;
       if (gameOver || gameNotFound) return;
       
       try {
@@ -291,7 +292,13 @@ if (!wsRef.current || wsRef.current.readyState > 1) {
       }
     }, 2000);
     
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
   }, [gameId, isAuthenticated, gameOver, gameNotFound]);
 
   // No toast: show modal for game over
