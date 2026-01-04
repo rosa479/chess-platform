@@ -177,6 +177,7 @@ if (chess.isGameOver()) {
 }
 
 async function handleGameOver(gameState, chess, reason, winner) {
+    console.log(`[DEBUG] handleGameOver called for game: ${gameState.gameId}`);
     const eventPayload = {
         gameId: gameState.gameId,
         whitePlayerId: gameState.whitePlayerId,
@@ -201,18 +202,45 @@ async function handleGameOver(gameState, chess, reason, winner) {
         whiteResult = 'draw'; blackResult = 'draw';
     }
     // Update players
-    (async () => {
-      try {
-        await axios.post(gameResultPath(gameState.whitePlayerId), { result: whiteResult });
-      } catch (err) {
-        console.error('Failed to update white player stats:', err?.response?.data || err.message);
-      }
-      try {
-        await axios.post(gameResultPath(gameState.blackPlayerId), { result: blackResult });
-      } catch (err) {
-        console.error('Failed to update black player stats:', err?.response?.data || err.message);
-      }
-    })();
+    let ratingChanges = { white: 0, black: 0 };
+
+    try {
+        console.log(`[DEBUG] Attempting to send rating update for game: ${gameState.gameId}`);
+    const ratingResponse = await axios.post(
+        `${RATING_SERVICE_URL}/ratings/update`,
+        {
+        gameId: gameState.gameId,
+        whitePlayerId: gameState.whitePlayerId,
+        blackPlayerId: gameState.blackPlayerId,
+        result: winner, // 'white' | 'black' | 'draw'
+        }
+    );
+
+    console.log(`[DEBUG] Rating update successful for game: ${gameState.gameId}`);
+        ratingChanges = ratingResponse.data.ratingChanges;
+    } catch (err) {
+    console.error('[DEBUG] Failed to update ratings (Caught error in game-lifecycle):', err?.response?.data || err.message);
+    }
+
+    // --- Update user stats WITH rating changes ---
+    try {
+    await axios.post(gameResultPath(gameState.whitePlayerId), {
+        result: whiteResult,
+        ratingChange: ratingChanges.white,
+    });
+    } catch (err) {
+    console.error('Failed to update white player stats:', err?.response?.data || err.message);
+    }
+
+    try {
+    await axios.post(gameResultPath(gameState.blackPlayerId), {
+        result: blackResult,
+        ratingChange: ratingChanges.black,
+    });
+    } catch (err) {
+    console.error('Failed to update black player stats:', err?.response?.data || err.message);
+    }
+
 
     // Clean up the active game state from Redis
     redisClient.del(`game:${gameState.gameId}`);

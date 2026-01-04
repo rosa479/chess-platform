@@ -253,16 +253,9 @@ const Game = () => {
             return;
           }
           
-          // Otherwise, game was never found or was deleted unexpectedly
-          if (isInitialLoadRef.current) {
-            setError('Game not found. It may have ended or been deleted.');
-            setLoading(false);
-            toast({
-              title: 'Game Not Found',
-              description: 'The game you are looking for does not exist. It may have ended.',
-              variant: 'destructive',
-            });
-          }
+          // Fallback for deleted/finished game, show Game Over for both players
+          setGameOver({ winner: 'unknown', reason: 'Game deleted or finished' });
+          setLoading(false);
           return; // Stop further polling
         }
         
