@@ -1,15 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/use-auth';
-import * as matchmakingApi from '@/lib/api-matchmaking-service';
+import { useSocket } from '@/context/SocketContext';
+import * as api from '@/lib/api';
 import { Clock, Search, X, Loader2 } from 'lucide-react';
 
 const Matchmaking = () => {
+  type RatingKey = 'bullet' | 'blitz' | 'rapid' | 'puzzles';
   const { user, isAuthenticated } = useAuth();
+  const { socket, isConnected } = useSocket();
   const navigate = useNavigate();
-  const [timeControls, setTimeControls] = useState({});
+  const [timeControls, setTimeControls] = useState<Record<string, api.TimeControl>>({});
   const [selectedTimeControl, setSelectedTimeControl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isInQueue, setIsInQueue] = useState(false);
@@ -17,32 +20,87 @@ const Matchmaking = () => {
   const [joinedAt, setJoinedAt] = useState<number | null>(null);
   const [waitTime, setWaitTime] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
-  const isPollingActive = useRef(false);
-  const hasJoinedQueue = useRef(false); // New: prevent duplicate join
+  const hasJoinedQueue = useRef(false);
+  const isMounted = useRef(true);
+
+  const ratingKey = useMemo(() => (selectedTimeControl || 'blitz') as RatingKey, [selectedTimeControl]);
 
   useEffect(() => {
     if (!isAuthenticated) navigate('/login');
   }, [isAuthenticated, navigate]);
 
+  // Check status on mount AND when socket reconnects
   useEffect(() => {
-    const init = async () => {
+    const checkStatus = async () => {
       if (!isAuthenticated || !user) return;
       try {
-        // clearActiveGame REMOVED
-        const controls = await matchmakingApi.getTimeControls();
-        setTimeControls(controls);
-        const firstKey = Object.keys(controls)[0];
-        if (firstKey) setSelectedTimeControl(firstKey);
-        // Don't checkQueueStatus here -- always start on join
+        const token = localStorage.getItem('auth_token');
+        if (!token) return;
+
+        // Load configs only once
+        if (Object.keys(timeControls).length === 0) {
+          const controls = await api.getTimeControls();
+          if (isMounted.current) {
+            setTimeControls(controls);
+            const firstKey = Object.keys(controls)[0];
+            if (firstKey && !selectedTimeControl) setSelectedTimeControl(firstKey);
+          }
+        }
+
+        // Check matchmaking/game status
+        const status = await api.getMatchmakingStatus(user.userId, token);
+        if (isMounted.current) {
+          if (status.inQueue) {
+            setIsInQueue(true);
+            setActiveQueueType(status.timeControl);
+            setJoinedAt(status.joinedAt);
+            hasJoinedQueue.current = true;
+          } else if (status.hasGame && status.gameId) {
+            // If we have a game, go to it immediately
+            navigate(`/game/${status.gameId}`);
+          } else {
+            // Not in queue, no game. 
+            // If we THOUGHT we were in queue (local state), but server says no, 
+            // it means we might have been removed or matched-but-missed.
+            // But getMatchmakingStatus checks activeGame. 
+            // So if hasGame is false, we are truly idle.
+            // Reset local state if needed.
+            if (isInQueue) {
+              setIsInQueue(false);
+              setJoinedAt(null);
+              hasJoinedQueue.current = false;
+            }
+          }
+        }
       } catch (err) {
-        setError('Failed to load matchmaking configuration');
+        if (isMounted.current) setError('Failed to sync status');
       }
     };
-    init();
-    return () => stopPolling();
-  }, [isAuthenticated, user]);
 
+    checkStatus();
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, user, isConnected]); // Run when connection restores
+
+  // Socket Listener for Match Found
+  useEffect(() => {
+    if (!socket) return;
+
+    const onMatchFound = (data: { gameId: string }) => {
+      console.log('Match found!', data);
+      setIsInQueue(false);
+      setIsLoading(false);
+      navigate(`/game/${data.gameId}`);
+    };
+
+    socket.on('match_found', onMatchFound);
+
+    return () => {
+      socket.off('match_found', onMatchFound);
+    };
+  }, [socket, navigate]);
+
+  // Timer for wait time
   useEffect(() => {
     if (!isInQueue || !joinedAt) {
       setWaitTime(0);
@@ -54,50 +112,25 @@ const Matchmaking = () => {
     return () => clearInterval(interval);
   }, [isInQueue, joinedAt]);
 
-  const stopPolling = () => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-    isPollingActive.current = false;
-  };
-
-  // Use /matchmaking/game/:userId for polling (per new request)
-  const startPolling = () => {
-    if (isPollingActive.current) return;
-    isPollingActive.current = true;
-    pollingRef.current = setInterval(async () => {
-      if (!user) return;
-      try {
-        const game = await matchmakingApi.getActiveGame(user.userId);
-        if (game && game.gameId) {
-          stopPolling();
-          setIsInQueue(false);
-          setIsLoading(false);
-          setJoinedAt(null);
-          setWaitTime(0);
-          navigate(`/game/${game.gameId}`);
-          return;
-        }
-      } catch (err) {
-        // No game found
-      }
-    }, 2000);
-  };
-
   const handleJoinQueue = async () => {
     if (!user || !selectedTimeControl || hasJoinedQueue.current || (activeQueueType && activeQueueType !== selectedTimeControl)) return;
     setIsLoading(true);
     setError(null);
     hasJoinedQueue.current = true;
     setActiveQueueType(selectedTimeControl);
+
     try {
-      await matchmakingApi.joinMatchmaking(user.userId, selectedTimeControl, user.rating);
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('No token');
+
+      await api.joinMatchmaking(token, user.userId, selectedTimeControl, user[ratingKey]);
+
       setIsInQueue(true);
       setJoinedAt(Date.now());
-      startPolling();
-    } catch (err: any) {
-      setError(err.message || 'Failed to join queue');
+      // No polling needed; socket will notify
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(error.message || 'Failed to join queue');
       setIsInQueue(false);
       hasJoinedQueue.current = false;
       setActiveQueueType(null);
@@ -109,22 +142,26 @@ const Matchmaking = () => {
   const handleLeaveQueue = async () => {
     if (!user) return;
     setIsLoading(true);
-    stopPolling();
     hasJoinedQueue.current = false;
     setActiveQueueType(null);
     try {
-      await matchmakingApi.leaveMatchmaking(user.userId);
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        await api.leaveMatchmaking(user.userId, token);
+      }
       setIsInQueue(false);
       setJoinedAt(null);
-    } catch (err: any) {
-      setError(err.message || 'Failed to leave queue');
-      setIsInQueue(false);
+    } catch (err: unknown) {
+      const error = err as Error;
+      setError(error.message || 'Failed to leave queue');
+      setIsInQueue(false); // Assume left anyway locally to reset UI
       setJoinedAt(null);
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Helper formatting functions
   const formatTime = (ms: number) => {
     const safeMs = Math.max(0, ms);
     const seconds = Math.floor(safeMs / 1000);
@@ -132,7 +169,7 @@ const Matchmaking = () => {
     const secs = seconds % 60;
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
-  const formatTimeControl = (control: any) => {
+  const formatTimeControl = (control: api.TimeControl) => {
     if (!control) return '';
     const minutes = Math.floor(control.initialMs / 60000);
     const seconds = (control.initialMs % 60000) / 1000;
@@ -147,7 +184,9 @@ const Matchmaking = () => {
     };
     return labels[key] || key;
   };
+
   if (!isAuthenticated || !user) return null;
+
   return (
     <MainLayout>
       <div className="flex items-center justify-center min-h-screen p-4">
@@ -172,12 +211,11 @@ const Matchmaking = () => {
                     {Object.entries(timeControls).map(([key, control]) => (
                       <button
                         key={key}
-                        onClick={() => {if (!isInQueue) setSelectedTimeControl(key)}}
-                        className={`p-4 rounded-lg border-2 transition-all text-left ${
-                          selectedTimeControl === key
-                            ? 'border-primary bg-primary/10'
-                            : 'border-border hover:border-primary/50'
-                        }`}
+                        onClick={() => { if (!isInQueue) setSelectedTimeControl(key) }}
+                        className={`p-4 rounded-lg border-2 transition-all text-left ${selectedTimeControl === key
+                          ? 'border-primary bg-primary/10'
+                          : 'border-border hover:border-primary/50'
+                          }`}
                       >
                         <div className="flex items-center justify-between">
                           <div>
@@ -186,7 +224,7 @@ const Matchmaking = () => {
                             </div>
                             <div className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
                               <Clock className="w-4 h-4" />
-                              {formatTimeControl(control)}
+                              {formatTimeControl(control as api.TimeControl)}
                             </div>
                           </div>
                           {selectedTimeControl === key && (
@@ -256,7 +294,7 @@ const Matchmaking = () => {
             <div className="mt-8 pt-6 border-t border-border">
               <div className="flex items-center justify-between text-sm text-muted-foreground">
                 <span>Your Rating</span>
-                <span className="font-semibold text-foreground">{user.rating}</span>
+                <span className="font-semibold text-foreground">{user[ratingKey]}</span>
               </div>
             </div>
           </div>

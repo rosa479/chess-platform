@@ -3,103 +3,59 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { GameHistory } from '@/components/GameHistory';
 import { Trophy, Target, Gamepad2, Settings, Calendar } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
-import * as ratingApi from '@/lib/api-rating-service';
-import * as userApi from '@/lib/api-user-service';
+import * as api from '@/lib/api';
 
-type RatingsByTC = {
-  bullet?: ratingApi.Rating;
-  blitz?: ratingApi.Rating;
-  rapid?: ratingApi.Rating;
-  overall?: ratingApi.Rating;
-};
+
 
 const Profile = () => {
   const { user, isAuthenticated } = useAuth();
 
-  const [ratings, setRatings] = useState<RatingsByTC>({});
-  const [profileData, setProfileData] = useState<any>(user);
+  // Start with user from context but ensure we fetch fresh data
+  const [profileData, setProfileData] = useState<api.User | null>(null);
   const [editing, setEditing] = useState(false);
   const [emailInput, setEmailInput] = useState(user?.email || '');
   const [updateError, setUpdateError] = useState<string | null>(null);
-  const [loadingRating, setLoadingRating] = useState(false);
-  const [ratingError, setRatingError] = useState<string | null>(null);
-  const [gameHistory, setGameHistory] = useState<any[]>([]);
-  const [historyError, setHistoryError] = useState<string | null>(null);
 
-  /* =========================
-     FETCH RATINGS (FIX)
-     ========================= */
-  useEffect(() => {
-    if (!isAuthenticated || !user) return;
-    let cancelled = false;
 
-    (async () => {
-      try {
-        setLoadingRating(true);
-        setRatingError(null);
 
-        const [bullet, blitz, rapid, overall] = await Promise.all([
-          ratingApi.getUserRating(user.userId, 'bullet'),
-          ratingApi.getUserRating(user.userId, 'blitz'),
-          ratingApi.getUserRating(user.userId, 'rapid'),
-          ratingApi.getUserRating(user.userId, 'overall'),
-        ]);
-
-        if (!cancelled) {
-          setRatings({ bullet, blitz, rapid, overall });
-        }
-      } catch (err: any) {
-        if (!cancelled) setRatingError(err.message || 'Failed to load rating');
-      } finally {
-        if (!cancelled) setLoadingRating(false);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [isAuthenticated, user]);
 
   /* =========================
      FETCH USER PROFILE
      ========================= */
   useEffect(() => {
     if (!isAuthenticated || !user) return;
-    userApi.getUserById(user.userId)
+    const token = localStorage.getItem('auth_token');
+    // Always fetch fresh data on mount
+    api.getUserById(user.userId, token || '')
       .then(data => {
+        console.log('[Profile] Fetched fresh data:', data);
         setProfileData(data);
         setEmailInput(data.email);
       })
-      .catch(() => {});
+      .catch(err => console.error('[Profile] Fetch failed', err));
   }, [isAuthenticated, user]);
 
-  /* =========================
-     FETCH GAME HISTORY
-     ========================= */
-  useEffect(() => {
-    if (!isAuthenticated || !user) return;
-    userApi.getUserGames(user.userId, 10)
-      .then(setGameHistory)
-      .catch(err => setHistoryError(err.message));
-  }, [isAuthenticated, user]);
+
 
   const handleSave = async () => {
     try {
       setUpdateError(null);
       const token = localStorage.getItem('auth_token');
-      const updated = await userApi.updateUser(
+      const updated = await api.updateUser(
         user.userId,
         { email: emailInput },
         token ?? ''
       );
       setProfileData(updated);
       setEditing(false);
-    } catch (error: any) {
-      setUpdateError(error.message || 'Failed to update');
+    } catch (error: unknown) {
+      setUpdateError((error as Error).message || 'Failed to update');
     }
   };
 
   const displayName = profileData?.username ?? 'Guest';
-  const displayRating = ratings.overall?.rating ?? 1500;
-  const gamesPlayed = ratings.overall?.gamesPlayed ?? 0;
+  const displayRating = profileData?.blitz ?? 1500;
+  const gamesPlayed = profileData?.gamesPlayed ?? 0;
   const gamesWon = profileData?.gamesWon ?? 0;
 
   return (
@@ -128,9 +84,7 @@ const Profile = () => {
                 </p>
 
                 <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-4">
-                  <span className="px-2 sm:px-3 py-1 rounded-full bg-primary/20 text-primary text-xs sm:text-sm font-medium shadow-sm">
-                    Rating: {loadingRating ? '…' : Math.round(displayRating)}
-                  </span>
+
                   <span className="px-2 sm:px-3 py-1 rounded-full bg-primary/20 text-primary text-xs sm:text-sm font-medium shadow-sm">
                     LBS Hall of Residence
                   </span>
@@ -151,28 +105,22 @@ const Profile = () => {
             {/* Rating Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
-                { label: 'Bullet', rating: ratings.bullet?.rating ?? 1500, icon: '⚡' },
-                { label: 'Blitz', rating: ratings.blitz?.rating ?? 1500, icon: '🔥' },
-                { label: 'Rapid', rating: ratings.rapid?.rating ?? 1500, icon: '⏱️' },
-                { label: 'Puzzles', rating: profileData?.puzzlesRating ?? 1200, icon: '🧩' },
+                { label: 'Bullet', rating: profileData?.bullet ?? 1500, icon: '⚡' },
+                { label: 'Blitz', rating: profileData?.blitz ?? 1500, icon: '🔥' },
+                { label: 'Rapid', rating: profileData?.rapid ?? 1500, icon: '⏱️' },
+                { label: 'Puzzles', rating: profileData?.puzzles ?? 1200, icon: '🧩' },
               ].map(item => (
                 <div key={item.label} className="bg-card rounded-xl p-4 text-center hover-lift">
                   <div className="text-2xl mb-2">{item.icon}</div>
                   <div className="text-2xl font-bold text-foreground">
-                    {loadingRating ? '…' : item.rating}
+                    {item.rating}
                   </div>
                   <div className="text-sm text-muted-foreground">{item.label}</div>
                 </div>
               ))}
             </div>
 
-            {historyError && (
-              <div className="text-xs text-destructive bg-destructive/10 p-2 rounded">
-                {historyError}
-              </div>
-            )}
-
-            <GameHistory games={gameHistory} />
+            <GameHistory games={profileData?.gameHistory?.slice(0, 10) || []} />
           </div>
 
           {/* Stats Sidebar */}
@@ -187,16 +135,12 @@ const Profile = () => {
                   label="Wins"
                   value={`${gamesWon.toLocaleString()}${gamesPlayed > 0 ? ` (${Math.round((gamesWon / gamesPlayed) * 100)}%)` : ''}`}
                 />
-                <Stat icon={<Target size={18} />} label="Puzzles Solved" value={profileData?.puzzlesSolved ?? 0} />
+                <Stat icon={<Target size={18} />} label="Puzzles Rating" value={profileData?.puzzles ?? 1200} />
                 <Stat icon={<Calendar size={18} />} label="Current Streak" value={`${profileData?.currentStreak ?? 0} days 🔥`} />
                 <Stat icon={<Settings size={18} />} label="Campus Rank" value={`#${profileData?.campusRank ?? '-'}`} />
               </div>
 
-              {ratingError && (
-                <div className="text-xs text-destructive bg-destructive/10 p-2 rounded mt-3">
-                  {ratingError}
-                </div>
-              )}
+
             </div>
           </div>
 
@@ -206,7 +150,7 @@ const Profile = () => {
   );
 };
 
-const Stat = ({ icon, label, value }: any) => (
+const Stat = ({ icon, label, value }: StatProps) => (
   <div className="flex items-center justify-between">
     <div className="flex items-center gap-3 text-muted-foreground">
       {icon}
@@ -215,5 +159,11 @@ const Stat = ({ icon, label, value }: any) => (
     <span className="font-medium text-foreground">{value}</span>
   </div>
 );
+
+interface StatProps {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+}
 
 export default Profile;

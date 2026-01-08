@@ -12,9 +12,19 @@ interface Move {
 interface GamePanelProps {
   className?: string;
   moves?: Move[];
+  whitePlayerInfo?: PlayerInfo;
+  blackPlayerInfo?: PlayerInfo;
 }
 
-export const GamePanel: React.FC<GamePanelProps> = ({ className, moves = [] }) => {
+interface PlayerInfo {
+  userId: string;
+  username: string;
+  ratingBefore: number;
+  ratingAfter: number;
+  isCurrentUser: boolean;
+}
+
+export const GamePanel: React.FC<GamePanelProps> = ({ className, moves = [], whitePlayerInfo, blackPlayerInfo }) => {
   const [activeTab, setActiveTab] = useState<'play' | 'chat'>('play');
 
   return (

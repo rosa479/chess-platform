@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Chess } from "chess.js";
+import { Chess, Piece } from "chess.js";
 import { ChessPiece, PieceType as PieceSymbolType } from "./ChessPiece";
 import { cn } from "@/lib/utils";
 
@@ -48,8 +48,8 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
   const [legalMoves, setLegalMoves] = useState<string[]>([]);
 
   const getBoardFromChess = (): PieceType[][] => {
-    const raw = chess.board();
-    return raw.map((row: any[]) =>
+    const raw: (Piece | null)[][] = chess.board();
+    return raw.map((row) =>
       row.map((cell) => {
         if (!cell) return null;
         const letter = cell.type;
@@ -73,7 +73,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
 
   const selectSquare = (squareId: string) => {
     if (!chess) return;
-    const moves = (chess.moves({ square: squareId as any, verbose: true }) || []) as any[];
+    const moves = (chess.moves({ square: squareId as import("chess.js").Square, verbose: true }) || []) as import("chess.js").Move[];
     if (moves && moves.length > 0) {
       setSelectedSquare(squareId);
       setLegalMoves(moves.map((m) => m.to));
@@ -87,7 +87,8 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
     if (!chess || !selectedSquare || disabled) return;
     if (!legalMoves.includes(targetSquare)) return;
 
-    const moveObj = { from: selectedSquare, to: targetSquare } as any;
+    type ChessMoveInput = { from: string; to: string; promotion?: string };
+    const moveObj: ChessMoveInput = { from: selectedSquare, to: targetSquare };
     
     // If onMoveAttempt is provided, use it (controlled mode)
     if (onMoveAttempt) {
@@ -174,7 +175,7 @@ export const ChessBoard: React.FC<ChessBoardProps> = ({
         draggable={false}
         onError={(e) => {
           // small debug aid if the image fails to load
-          // eslint-disable-next-line no-console
+
           console.warn("Board image failed to load:", boardSrc);
         }}
       />

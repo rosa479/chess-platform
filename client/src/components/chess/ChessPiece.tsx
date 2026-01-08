@@ -58,7 +58,7 @@ export const ChessPiece: React.FC<ChessPieceProps> = ({
     // all candidates tried -> fallback to glyph
     setFailedAll(true);
     // log helpful message
-    // eslint-disable-next-line no-console
+
     console.warn("ChessPiece: all image candidates failed for", filename, candidates);
   };
 

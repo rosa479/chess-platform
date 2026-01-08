@@ -1,9 +1,0 @@
-{
-  "name": "chess-platform-validators",
-  "version": "1.0.0",
-  "description": "Shared validation schemas and utilities for the chess platform.",
-  "main": "index.js",
-  "dependencies": {
-    "joi": "^17.9.2"
-  }
-}

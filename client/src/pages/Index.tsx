@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { ChessBoard } from "@/components/chess/ChessBoard";
 import { PlayerInfo } from "@/components/chess/PlayerInfo";
@@ -49,14 +49,12 @@ const Index = () => {
   const [board, setBoard] = useState(boards[0]);
 
   // Set the board colors according to preset
-  React.useEffect(() => {
+  useEffect(() => {
     const colors = boardColorMap[board] || boardColorMap["default"];
-    if (colors) {
-      const root = document.documentElement;
-      root.style.setProperty('--chess-light', colors.light);
-      root.style.setProperty('--chess-dark', colors.dark);
-      root.style.setProperty('--chess-highlight', colors.highlight);
-    }
+    const root = document.documentElement;
+    root.style.setProperty('--chess-light', colors.light);
+    root.style.setProperty('--chess-dark', colors.dark);
+    root.style.setProperty('--chess-highlight', colors.highlight);
   }, [board]);
 
   const themes = [
@@ -135,7 +133,8 @@ const Index = () => {
               </div>
             </div>
 
-            <PlayerInfo username="The duke" rating={420} isTop timeLeft="10:00" isActive={false} />
+            {/* Demo PlayerInfo (Top) */}
+            <PlayerInfo username="The duke (Demo)" rating={420} isTop timeLeft="10:00" isActive={false} />
 
             <ChessBoard
               theme={theme}
@@ -143,24 +142,27 @@ const Index = () => {
               onMove={({ san, color }) => {
                 setMoves((prev) => {
                   if (color === "w") {
-                    const moveNumber = prev.length + 1;
+                    const moveNumber = Math.floor(prev.length / 2) + 1;
                     return [...prev, { number: moveNumber, white: san }];
                   }
                   // black move updates last ply
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
-                  if (last) {
+                  if (last && !last.black) {
                     updated[updated.length - 1] = { ...last, black: san };
                   } else {
-                    // in case a black move somehow comes first
-                    updated.push({ number: prev.length + 1, white: "...", black: san });
+                    // If black moves first or there's no previous white move,
+                    // create a new entry for black's move.
+                    const moveNumber = Math.floor(prev.length / 2) + 1;
+                    updated.push({ number: moveNumber, black: san });
                   }
                   return updated;
                 });
               }}
             />
 
-            <PlayerInfo username="Noobmaster69" rating={679} isTop={false} timeLeft="10:00" isActive />
+            {/* Demo PlayerInfo (Bottom) */}
+            <PlayerInfo username="Noobmaster69 (Demo)" rating={679} isTop={false} timeLeft="10:00" isActive />
           </div>
         </div>
 

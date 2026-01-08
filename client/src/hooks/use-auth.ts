@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import * as api from '@/lib/api-user-service';
+import * as api from '@/lib/api';
 
 export function useAuth() {
   const [user, setUser] = useState(() => {
@@ -21,8 +21,8 @@ export function useAuth() {
       localStorage.setItem('user_info', JSON.stringify(user));
       setLoading(false);
       return { user, token };
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError((err as Error).message);
       setLoading(false);
       throw err;
     }
@@ -39,8 +39,8 @@ export function useAuth() {
       localStorage.setItem('user_info', JSON.stringify(user));
       setLoading(false);
       return { user, token };
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError((err as Error).message);
       setLoading(false);
       throw err;
     }

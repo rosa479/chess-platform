@@ -1,28 +1,20 @@
 import React from "react";
 import { Clock, Zap, Bot, Trophy } from "lucide-react";
 
+import * as api from '@/lib/api';
+
 type Mode = "bullet" | "blitz" | "rapid" | "bot";
 
-interface PlayerInfo {
-  name: string;
-  rating: number;
-  won?: boolean;
-}
+const iconForMode = (timeControl: string) => {
+  if (timeControl.includes("bullet")) return <Zap size={18} />;
+  if (timeControl.includes("blitz")) return <Clock size={18} />;
+  if (timeControl.includes("rapid")) return <Clock size={18} />;
+  // Assuming "bot" might be part of the timeControl string or a specific timeControl value
+  if (timeControl.includes("bot")) return <Bot size={18} />;
+  return <Clock size={18} />; // Default icon
+};
 
-interface GameEntry {
-  timeControl: string;
-  modeIcon: Mode;
-  white: PlayerInfo;
-  black: PlayerInfo;
-  // now "Won" | "Lost"
-  result: "Won" | "Lost";
-  date: string;
-}
-
-const iconForMode = (m: Mode) =>
-  m === "bullet" ? <Zap size={18} /> : m === "bot" ? <Bot size={18} /> : <Clock size={18} />;
-
-export const GameHistory: React.FC<{ games: GameEntry[] }> = ({ games }) => {
+export const GameHistory: React.FC<{ games: api.GameHistoryEntry[] }> = ({ games }) => {
   return (
     <div className="relative rounded-2xl p-6 mb-6 overflow-hidden bg-gradient-to-br from-primary/6 via-primary/3 to-background border border-border shadow-xl">
       
@@ -42,8 +34,9 @@ export const GameHistory: React.FC<{ games: GameEntry[] }> = ({ games }) => {
 
         <div className="divide-y divide-border rounded-lg overflow-hidden">
           {games.map((g, idx) => {
-            const whiteWon = g.white.won;
-            const blackWon = g.black.won;
+            const isWon = g.result === "won";
+            const isLost = g.result === "lost";
+            const isDraw = g.result === "draw";
 
             return (
               <div
@@ -53,7 +46,7 @@ export const GameHistory: React.FC<{ games: GameEntry[] }> = ({ games }) => {
                 {/* Time Control */}
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <span className="w-9 h-9 rounded-lg flex items-center justify-center bg-secondary/50">
-                    {iconForMode(g.modeIcon)}
+                    {iconForMode(g.timeControl)}
                   </span>
                   <span>{g.timeControl}</span>
                 </div>
@@ -62,18 +55,18 @@ export const GameHistory: React.FC<{ games: GameEntry[] }> = ({ games }) => {
                 <div className="col-span-2">
                   <div className="flex flex-col">
                     
-                    {/* White */}
+                    {/* Current User */}
                     <div className="flex items-center gap-3">
-                      <span className={`w-2 h-2 rounded-full ${whiteWon ? "bg-green-400" : "bg-red-400"}`} />
-                      <span className="font-medium text-foreground">{g.white.name}</span>
-                      <span className="text-muted-foreground">({g.white.rating})</span>
+                      <span className={`w-2 h-2 rounded-full ${isWon ? "bg-green-400" : isDraw ? "bg-yellow-400" : "bg-red-400"}`} />
+                      <span className="font-medium text-foreground">You</span>
+                      <span className="text-muted-foreground">({g.ratingBefore} &rarr; {g.ratingAfter})</span>
                     </div>
 
-                    {/* Black */}
+                    {/* Opponent */}
                     <div className="flex items-center gap-3 mt-2">
-                      <span className={`w-2 h-2 rounded-full ${blackWon ? "bg-green-400" : "bg-red-400"}`} />
-                      <span className="font-medium text-foreground">{g.black.name}</span>
-                      <span className="text-muted-foreground">({g.black.rating})</span>
+                      <span className={`w-2 h-2 rounded-full ${isLost ? "bg-green-400" : isDraw ? "bg-yellow-400" : "bg-red-400"}`} />
+                      <span className="font-medium text-foreground">{g.opponentUsername || "Unknown"}</span>
+                      <span className="text-muted-foreground"></span>
                     </div>
                   </div>
                 </div>
@@ -82,12 +75,12 @@ export const GameHistory: React.FC<{ games: GameEntry[] }> = ({ games }) => {
                 <div className="flex flex-col items-end">
                   <span
                     className={`text-sm font-semibold ${
-                      g.result === "Won" ? "text-green-400" : "text-red-400"
+                      isWon ? "text-green-400" : isDraw ? "text-yellow-400" : "text-red-400"
                     }`}
                   >
-                    {g.result}
+                    {g.result.charAt(0).toUpperCase() + g.result.slice(1)}
                   </span>
-                  <span className="text-xs text-muted-foreground mt-1">{g.date}</span>
+                  <span className="text-xs text-muted-foreground mt-1">{new Date(g.playedAt).toLocaleDateString()}</span>
                 </div>
 
               </div>

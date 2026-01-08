@@ -8,6 +8,7 @@ interface PlayerInfoProps {
   isTop?: boolean;
   timeLeft?: string;
   isActive?: boolean;
+  ratingType?: string;
 }
 
 export const PlayerInfo: React.FC<PlayerInfoProps> = ({
@@ -17,6 +18,7 @@ export const PlayerInfo: React.FC<PlayerInfoProps> = ({
   isTop = false,
   timeLeft = "10:00",
   isActive = false,
+  ratingType,
 }) => {
   return (
     <div className={cn(
@@ -41,7 +43,9 @@ export const PlayerInfo: React.FC<PlayerInfoProps> = ({
         {/* Name & Rating */}
         <div className="flex flex-col">
           <span className="font-medium text-foreground">{username}</span>
-          <span className="text-sm text-muted-foreground">({rating})</span>
+          <span className="text-sm text-muted-foreground">
+            {ratingType ? `${ratingType}: ` : ''}({rating})
+          </span>
         </div>
 
         {/* Material indicator */}
