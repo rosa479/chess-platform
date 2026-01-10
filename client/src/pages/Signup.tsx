@@ -12,7 +12,7 @@ import { Crown } from 'lucide-react';
 const Signup = () => {
   const navigate = useNavigate();
   const { register, loading, error } = useAuth();
-  const [form, setForm] = useState({ username: '', email: '', password: '', confirmPassword: '' });
+  const [form, setForm] = useState({ username: '', email: '', password: '', confirmPassword: '', hallOfResidence: '' });
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,13 +30,18 @@ const Signup = () => {
       return;
     }
 
+    if (!form.hallOfResidence) {
+      setValidationError('Please select your hall of residence');
+      return;
+    }
+
     try {
-      await register(form.username, form.email, form.password);
+      await register(form.username, form.email, form.password, form.hallOfResidence);
       toast({ title: 'Success', description: 'Account created successfully!' });
       navigate('/');
     } catch (err) {
-      toast({ 
-        title: 'Signup Failed', 
+      toast({
+        title: 'Signup Failed',
         description: (err as Error).message || 'Failed to create account',
         variant: 'destructive'
       });
@@ -81,6 +86,42 @@ const Signup = () => {
                   required
                   disabled={loading}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="hallOfResidence">Hall of Residence *</Label>
+                <select
+                  id="hallOfResidence"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  value={form.hallOfResidence}
+                  onChange={(e) => setForm({ ...form, hallOfResidence: e.target.value })}
+                  required
+                  disabled={loading}
+                >
+                  <option value="">Select your hall</option>
+                  <option>Rajendra Prasad Hall of Residence</option>
+                  <option>Radhakrishnan Hall of Residence</option>
+                  <option>Meghnad Saha Hall of Residence</option>
+                  <option>Lala Lajpat Rai Hall of Residence</option>
+                  <option>Pandit Madan Mohan Malaviya Hall of Residence</option>
+                  <option>Lal Bahadur Shastri Hall of Residence</option>
+                  <option>Patel Hall of Residence</option>
+                  <option>Nehru Hall of Residence</option>
+                  <option>Azad Hall of Residence</option>
+                  <option>Zakhir Hussain Hall of Residence</option>
+                  <option>Bhim Rao Ambedkar Hall of Residence</option>
+                  <option>Homi Jehangir Bhabha Hall of Residence</option>
+                  <option>Acharya Jagadish Chandra Bose Hall of Residence</option>
+                  <option>Vidyasagar Hall of Residence</option>
+                  <option>Sister Nivedita Hall of Residence</option>
+                  <option>Mother Teresa Hall of Residence</option>
+                  <option>Sarojini Naidu/ Indira Gandhi Hall of Residence</option>
+                  <option>Rani Laxmibai Hall of Residence</option>
+                  <option>Gokhale Hall of Residence</option>
+                  <option>Sir Ashutosh Mukherjee Hall of Residence</option>
+                  <option>Bidhan Chandra Roy Hall of Residence</option>
+                  <option>Savitribai Phule Hall of Residence</option>
+                  <option>Atal Bihari Vajpayee Hall of Residence</option>
+                </select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">Password</Label>

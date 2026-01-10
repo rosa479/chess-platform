@@ -86,7 +86,7 @@ const Profile = () => {
                 <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-4">
 
                   <span className="px-2 sm:px-3 py-1 rounded-full bg-primary/20 text-primary text-xs sm:text-sm font-medium shadow-sm">
-                    LBS Hall of Residence
+                    {profileData?.hallOfResidence || 'Hall not set'}
                   </span>
                   <span className="px-2 sm:px-3 py-1 rounded-full bg-primary/20 text-primary text-xs sm:text-sm font-medium shadow-sm">
                     #69 in IIT KGP
@@ -120,7 +120,7 @@ const Profile = () => {
               ))}
             </div>
 
-            <GameHistory games={profileData?.gameHistory?.slice(0, 10) || []} />
+            <GameHistory games={profileData?.gameHistory || []} />
           </div>
 
           {/* Stats Sidebar */}

@@ -7,8 +7,7 @@ export type GameHistoryEntry = {
   opponentUserId: string;
   opponentUsername: string;
   result: 'won' | 'lost' | 'draw';
-  ratingBefore: number;
-  ratingAfter: number;
+  ratingChange: number; // The rating change from this game (+/-)
   timeControl: string;
   termination: string;
   playedAt: string;
@@ -18,6 +17,7 @@ export type User = {
   userId: string;
   username: string;
   email: string;
+  hallOfResidence: string;
   bullet: number;
   blitz: number;
   rapid: number;
@@ -57,11 +57,11 @@ export async function login(username: string, password: string) {
   return data as { message: string; user: User; token: string };
 }
 
-export async function register(username: string, email: string, password: string) {
+export async function register(username: string, email: string, password: string, hallOfResidence: string) {
   const res = await fetch(`${API_BASE_URL}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, email, password }),
+    body: JSON.stringify({ username, email, password, hallOfResidence }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Registration failed');
@@ -198,6 +198,7 @@ export type GameState = {
   timeControlKey: string;
   createdAt: number;
   lastMoveTimestamp: number;
+  gameStarted: boolean; // Timer only starts after white's first move
 };
 
 export async function getGameState(token: string, gameId: string): Promise<GameState> {

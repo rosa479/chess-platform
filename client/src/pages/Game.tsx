@@ -50,6 +50,7 @@ const Game = () => {
   const blackBaseRef = useRef<number>(0);
   const tsBaseRef = useRef<number>(0);
   const fenBaseRef = useRef<string>('');
+  const gameStartedRef = useRef<boolean>(false); // Timer only starts after white's first move
 
   const syncMovesFromFen = React.useCallback((targetFen: string) => {
     const historyChess = chessHistory.current;
@@ -87,6 +88,14 @@ const Game = () => {
   const computeTimes = React.useCallback(() => {
     const ts = tsBaseRef.current;
     if (!ts || gameOver) return;
+
+    // If game hasn't started yet, show full time for both players (no countdown)
+    if (!gameStartedRef.current) {
+      setWhiteTimeLeft(whiteBaseRef.current);
+      setBlackTimeLeft(blackBaseRef.current);
+      return;
+    }
+
     let isWhiteTurnLocal = true;
     try {
       chess.load(fenBaseRef.current);
@@ -100,7 +109,7 @@ const Game = () => {
       setBlackTimeLeft(Math.max(0, blackBaseRef.current - elapsed));
       setWhiteTimeLeft(whiteBaseRef.current);
     }
-  }, [gameOver, chess, whiteBaseRef, blackBaseRef, fenBaseRef, tsBaseRef]);
+  }, [gameOver, chess, whiteBaseRef, blackBaseRef, fenBaseRef, tsBaseRef, gameStartedRef]);
 
   // Set board colors
   useEffect(() => {
@@ -165,6 +174,7 @@ const Game = () => {
         blackBaseRef.current = newState.blackTimeLeftMs;
         tsBaseRef.current = newState.lastMoveTimestamp;
         fenBaseRef.current = newState.fen;
+        gameStartedRef.current = newState.gameStarted ?? false;
         computeTimes();
         syncMovesFromFen(newState.fen);
       };
@@ -265,6 +275,7 @@ const Game = () => {
         blackBaseRef.current = state.blackTimeLeftMs;
         tsBaseRef.current = state.lastMoveTimestamp;
         fenBaseRef.current = state.fen;
+        gameStartedRef.current = state.gameStarted ?? false;
         computeTimes();
         chess.load(state.fen);
         syncMovesFromFen(state.fen);
@@ -317,8 +328,8 @@ const Game = () => {
     const interval = setInterval(() => {
       computeTimes();
 
-      // Auto-claim timeout check
-      if (!gameId || !user) return;
+      // Auto-claim timeout check - only after game has started
+      if (!gameId || !user || !gameStartedRef.current) return;
 
       // We need to know current time left from state ref to avoid staleness
       // Actually computeTimes calls setWhiteTimeLeft etc, but we can't read those states immediately here?
@@ -584,52 +595,134 @@ const Game = () => {
 
             {/* Game over message */}
             {gameOver && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
-                <div className="relative bg-card border border-border rounded-lg shadow-lg max-w-full w-[380px] text-center p-6 animate-pop">
-                  <div className="text-2xl font-extrabold mb-3 text-primary">Game Over</div>
-                  <div className="mb-4">
-                    {gameOver.winner === 'draw' ? (
-                      <div className="text-lg font-semibold mb-1">
-                        Draw by <span className="capitalize">{gameOver.reason}</span>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="text-lg font-semibold mb-1">
-                          Winner: <span className="text-green-700 font-bold">{gameOver.winner === 'white' ? whitePlayerName : blackPlayerName}</span>
-                        </div>
-                        <div className="text-base mb-1">Loser: <span className="text-destructive font-bold">{gameOver.winner === 'white' ? blackPlayerName : whitePlayerName}</span></div>
-                        <div className="text-sm text-muted-foreground mb-2">by <span className="capitalize">{gameOver.reason}</span></div>
-                      </>
-                    )}
-
-                    {/* Rating Change Display */}
-                    {(gameOver as any).whiteRatingChange !== undefined && (
-                      <div className="mt-4 flex justify-around text-sm font-semibold">
-                        <div className="flex flex-col items-center">
-                          <span className="text-muted-foreground">{whitePlayerName}</span>
-                          <span className={(gameOver as any).whiteRatingChange >= 0 ? 'text-green-600' : 'text-red-600'}>
-                            {(gameOver as any).whiteRatingChange > 0 ? '+' : ''}{(gameOver as any).whiteRatingChange}
-                          </span>
-                        </div>
-                        <div className="flex flex-col items-center">
-                          <span className="text-muted-foreground">{blackPlayerName}</span>
-                          <span className={(gameOver as any).blackRatingChange >= 0 ? 'text-green-600' : 'text-red-600'}>
-                            {(gameOver as any).blackRatingChange > 0 ? '+' : ''}{(gameOver as any).blackRatingChange}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+                <div className="relative bg-card border-2 border-border rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+                  {/* Header with gradient background */}
+                  <div className="bg-gradient-to-r from-primary/20 to-accent/20 p-6 border-b border-border">
+                    <h2 className="text-3xl font-bold text-center text-foreground">
+                      Game Over
+                    </h2>
                   </div>
-                  <div className="flex gap-3 justify-center mt-2">
-                    <button className="px-4 py-2 rounded bg-primary text-primary-foreground font-bold hover:bg-primary/90 transition-all" onClick={() => navigate('/play')}>
-                      Home
-                    </button>
-                    <button className="px-4 py-2 rounded bg-secondary text-secondary-foreground border font-semibold hover:bg-secondary/70 transition-all" onClick={() => navigate('/match/new')}>
-                      Play Again
-                    </button>
+
+                  {/* Content */}
+                  <div className="p-6 space-y-6">
+                    {/* Result Display */}
+                    <div className="text-center">
+                      {gameOver.winner === 'draw' ? (
+                        <>
+                          <div className="text-6xl mb-4">🤝</div>
+                          <div className="text-2xl font-bold text-yellow-500 mb-2">Draw</div>
+                          <div className="text-sm text-muted-foreground">
+                            by <span className="capitalize font-medium">{gameOver.reason}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-6xl mb-4">
+                            {gameOver.winner === 'white' ? '♔' : '♚'}
+                          </div>
+                          <div className="text-2xl font-bold text-green-500 mb-2">
+                            {gameOver.winner === 'white' ? whitePlayerName : blackPlayerName} Wins!
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {gameOver.winner === 'white' ? blackPlayerName : whitePlayerName} lost by{' '}
+                            <span className="capitalize font-medium">{gameOver.reason}</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Rating Changes */}
+                    <div className="bg-secondary/30 rounded-xl p-4">
+                      {(gameOver as any).noRatingChange ? (
+                        <div className="text-center">
+                          <div className="text-sm font-medium text-muted-foreground mb-1">
+                            Rating Changes
+                          </div>
+                          <div className="text-base text-yellow-600 dark:text-yellow-500 font-semibold">
+                            No rating change
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            (Both players must move for ratings to change)
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="text-sm font-medium text-center text-muted-foreground mb-3">
+                            Rating Changes
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            {/* White Player */}
+                            <div className="bg-card rounded-lg p-3 text-center border border-border">
+                              <div className="text-xs text-muted-foreground mb-1">
+                                {whitePlayerName}
+                              </div>
+                              <div className="text-sm text-muted-foreground mb-1">
+                                {whitePlayerRating}
+                              </div>
+                              <div
+                                className={`text-2xl font-bold ${(gameOver as any).whiteRatingChange > 0
+                                    ? 'text-green-500'
+                                    : (gameOver as any).whiteRatingChange < 0
+                                      ? 'text-red-500'
+                                      : 'text-muted-foreground'
+                                  }`}
+                              >
+                                {(gameOver as any).whiteRatingChange > 0 ? '+' : ''}
+                                {(gameOver as any).whiteRatingChange || 0}
+                              </div>
+                            </div>
+
+                            {/* Black Player */}
+                            <div className="bg-card rounded-lg p-3 text-center border border-border">
+                              <div className="text-xs text-muted-foreground mb-1">
+                                {blackPlayerName}
+                              </div>
+                              <div className="text-sm text-muted-foreground mb-1">
+                                {blackPlayerRating}
+                              </div>
+                              <div
+                                className={`text-2xl font-bold ${(gameOver as any).blackRatingChange > 0
+                                    ? 'text-green-500'
+                                    : (gameOver as any).blackRatingChange < 0
+                                      ? 'text-red-500'
+                                      : 'text-muted-foreground'
+                                  }`}
+                              >
+                                {(gameOver as any).blackRatingChange > 0 ? '+' : ''}
+                                {(gameOver as any).blackRatingChange || 0}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-3">
+                      <button
+                        className="flex-1 px-4 py-3 rounded-lg bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-all shadow-md hover:shadow-lg"
+                        onClick={() => navigate('/play')}
+                      >
+                        Play Again
+                      </button>
+                      <button
+                        className="flex-1 px-4 py-3 rounded-lg bg-secondary text-secondary-foreground font-semibold hover:bg-secondary/80 transition-all border border-border"
+                        onClick={() => navigate('/')}
+                      >
+                        Home
+                      </button>
+                    </div>
                   </div>
-                  <button aria-label="Close" onClick={() => navigate('/play')} className="absolute top-2 right-2 text-lg text-muted-foreground hover:text-primary">&times;</button>
+
+                  {/* Close button */}
+                  <button
+                    aria-label="Close"
+                    onClick={() => navigate('/play')}
+                    className="absolute top-4 right-4 w-8 h-8 rounded-full bg-secondary hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-colors flex items-center justify-center"
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
             )}

@@ -6,6 +6,48 @@ const axios = require('axios'); // For internal or external hooks if needed (e.g
 
 // Constants
 const UNIFIED_BASE_URL = process.env.UNIFIED_BASE_URL || 'http://localhost:3001';
+const STARTING_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+
+// Helper: Check if game has truly started (backward compatible)
+// Returns true if: gameStarted === true OR (gameStarted undefined AND FEN differs from start)
+function hasGameStarted(gameState) {
+    // Explicit true means game has started
+    if (gameState.gameStarted === true) return true;
+
+    // Explicit false means game has not started
+    if (gameState.gameStarted === false) return false;
+
+    // For backward compatibility: if field is undefined, check FEN
+    // If FEN is not the starting position, assume game has started
+    if (gameState.gameStarted === undefined) {
+        return gameState.fen !== STARTING_FEN;
+    }
+
+    return false;
+}
+
+// Check if both players have made at least one move
+// Required for rating changes - game must have real participation from both sides
+function haveBothPlayersMoved(fen) {
+    try {
+        // FEN format: position turn castling enpassant halfmove fullmove
+        // Example: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        // The last number is the fullmove counter (starts at 1, increments after black moves)
+        const fenParts = fen.trim().split(' ');
+        if (fenParts.length < 6) return false;
+
+        const fullmoveNumber = parseInt(fenParts[5], 10);
+
+        // After white's first move: fullmove = 1
+        // After black's first move: fullmove = 2 (both players have moved)
+        // So both players have moved when fullmove >= 2
+        return fullmoveNumber >= 2;
+    } catch (e) {
+        // If FEN parsing fails, assume no moves
+        console.error('[GameService] Error parsing FEN for move count:', e);
+        return false;
+    }
+}
 
 async function createGame({ whitePlayerId, blackPlayerId, timeControl, timeControlKey }) {
     const gameId = uuidv4();
@@ -23,6 +65,7 @@ async function createGame({ whitePlayerId, blackPlayerId, timeControl, timeContr
         timeControlKey,
         createdAt: Date.now(),
         lastMoveTimestamp: Date.now(),
+        gameStarted: false, // Timer doesn't start until white makes first move
     };
 
     await redis
@@ -64,16 +107,23 @@ async function handlePlayerMove(gameId, playerId, move) {
             return { error: 'Not your turn' };
         }
 
-        // Time Calc
+        // Time Calc - only deduct time after game has started (after white's first move)
         const now = Date.now();
         const elapsed = now - gameState.lastMoveTimestamp;
 
-        if (turn === 'w') {
-            gameState.whiteTimeLeftMs -= elapsed;
-            if (gameState.whiteTimeLeftMs <= 0) return await handleGameOver(gameState, chess, 'timeout', 'black');
-        } else {
-            gameState.blackTimeLeftMs -= elapsed;
-            if (gameState.blackTimeLeftMs <= 0) return await handleGameOver(gameState, chess, 'timeout', 'white');
+        // If this is white's first move, mark game as started but don't deduct time
+        if (turn === 'w' && !gameState.gameStarted) {
+            gameState.gameStarted = true;
+            // First move: no time deduction, just mark as started
+        } else if (gameState.gameStarted) {
+            // Game has started, deduct time from the player whose turn it was
+            if (turn === 'w') {
+                gameState.whiteTimeLeftMs -= elapsed;
+                if (gameState.whiteTimeLeftMs <= 0) return await handleGameOver(gameState, chess, 'timeout', 'black');
+            } else {
+                gameState.blackTimeLeftMs -= elapsed;
+                if (gameState.blackTimeLeftMs <= 0) return await handleGameOver(gameState, chess, 'timeout', 'white');
+            }
         }
 
         // Move
@@ -111,19 +161,34 @@ async function handlePlayerMove(gameId, playerId, move) {
 const { calculateRatingChange } = require('../lib/rating');
 
 async function handleGameOver(gameState, chess, reason, winner) {
+    console.log(`[DEBUG handleGameOver] Called with reason: ${reason}, winner: ${winner}`);
+    console.log(`[DEBUG handleGameOver] FEN: ${gameState.fen}`);
+
     const endedKey = `game:ended:${gameState.gameId}`;
     const alreadyEnded = await redis.get(endedKey);
     if (alreadyEnded) return { gameOver: true, outcome: { winner, reason } };
 
     await redis.set(endedKey, '1', 'EX', 120);
 
-    // Calculate ratings locally before cleanup to ensure we have data
-    // We await this now to send the updates to the client immediately
-    const ratingUpdates = await updateRatingsAndHistory(gameState, winner, reason);
+    // Check if both players have moved - required for rating changes
+    const bothPlayersMoved = haveBothPlayersMoved(gameState.fen);
+    console.log(`[DEBUG handleGameOver] Both players moved: ${bothPlayersMoved}`);
+
+    let ratingUpdates = null;
+    if (bothPlayersMoved) {
+        // Both players moved - calculate rating changes
+        console.log(`[DEBUG handleGameOver] Calculating rating changes...`);
+        ratingUpdates = await updateRatingsAndHistory(gameState, winner, reason);
+        console.log(`[DEBUG handleGameOver] Rating updates:`, ratingUpdates);
+    } else {
+        // Game ended before both players moved - no rating change
+        console.log(`[GameService] Game ended without rating change - not enough moves (both players must move)`);
+    }
 
     const outcome = {
         winner,
         reason,
+        noRatingChange: !bothPlayersMoved,
         whiteRatingChange: ratingUpdates?.whiteRatingChange || 0,
         blackRatingChange: ratingUpdates?.blackRatingChange || 0,
         whiteRating: ratingUpdates?.newWhiteRating,
@@ -164,7 +229,7 @@ async function resignGame(gameId, playerId) {
     const winner = playerId === gameState.whitePlayerId ? 'black' : 'white';
     const chess = new Chess(gameState.fen); // Load position for consistency
 
-    return await handleGameOver(gameState, chess, 'resignation', winner);
+    // Let handleGameOver decide on rating changes based on move count
     return await handleGameOver(gameState, chess, 'resignation', winner);
 }
 
@@ -178,6 +243,7 @@ async function claimTimeout(gameId, claimantId) {
         if (!gameJSON) return { error: 'Game not found' };
 
         const gameState = JSON.parse(gameJSON);
+
         const chess = new Chess(gameState.fen);
 
         // Check time
@@ -215,22 +281,30 @@ async function claimTimeout(gameId, claimantId) {
 }
 
 async function updateRatingsAndHistory(gameState, winner, reason) {
+    console.log(`[DEBUG updateRatingsAndHistory] Called with winner: ${winner}, reason: ${reason}`);
+
     const whiteUser = await User.findOne({ userId: gameState.whitePlayerId });
     const blackUser = await User.findOne({ userId: gameState.blackPlayerId });
 
-    if (!whiteUser || !blackUser) return null;
+    if (!whiteUser || !blackUser) {
+        console.log(`[DEBUG updateRatingsAndHistory] User not found! White: ${!!whiteUser}, Black: ${!!blackUser}`);
+        return null;
+    }
 
     const timeControlKey = gameState.timeControlKey || 'rapid'; // Default fallback
     const whiteRating = whiteUser[timeControlKey] || 1200;
     const blackRating = blackUser[timeControlKey] || 1200;
+    console.log(`[DEBUG updateRatingsAndHistory] Ratings - White: ${whiteRating}, Black: ${blackRating}`);
 
     // Calculate Score (1 for White win, 0 for Black win, 0.5 for Draw)
     let whiteScore = 0.5;
     if (winner === 'white') whiteScore = 1;
     else if (winner === 'black') whiteScore = 0;
+    console.log(`[DEBUG updateRatingsAndHistory] White score: ${whiteScore}`);
 
     const whiteChange = calculateRatingChange(whiteRating, blackRating, whiteScore);
     const blackChange = calculateRatingChange(blackRating, whiteRating, 1 - whiteScore);
+    console.log(`[DEBUG updateRatingsAndHistory] Rating changes - White: ${whiteChange}, Black: ${blackChange}`);
 
     const newWhiteRating = whiteRating + whiteChange;
     const newBlackRating = blackRating + blackChange;
@@ -301,7 +375,6 @@ module.exports = {
     createGame,
     getGameState,
     handlePlayerMove,
-    handleGameOver,
     handleGameOver,
     resignGame,
     claimTimeout

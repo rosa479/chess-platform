@@ -11,9 +11,9 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 // Register
 router.post('/register', async (req, res) => {
     try {
-        const { username, email, password } = req.body;
-        if (!username || !email || !password) {
-            return res.status(400).json({ error: 'Username, email, and password are required' });
+        const { username, email, password, hallOfResidence } = req.body;
+        if (!username || !email || !password || !hallOfResidence) {
+            return res.status(400).json({ error: 'Username, email, password, and hall of residence are required' });
         }
 
         const existingUser = await User.findOne({ $or: [{ username }, { email }] });
@@ -29,6 +29,7 @@ router.post('/register', async (req, res) => {
             username,
             email,
             password: hashedPassword,
+            hallOfResidence,
         });
         await user.save();
 

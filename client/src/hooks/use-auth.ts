@@ -28,11 +28,11 @@ export function useAuth() {
     }
   }
 
-  async function register(username: string, email: string, password: string) {
+  async function register(username: string, email: string, password: string, hallOfResidence: string) {
     setLoading(true);
     setError(null);
     try {
-      const { user, token } = await api.register(username, email, password);
+      const { user, token } = await api.register(username, email, password, hallOfResidence);
       setUser(user);
       setToken(token);
       localStorage.setItem('auth_token', token);
